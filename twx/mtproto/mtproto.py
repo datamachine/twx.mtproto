@@ -19,11 +19,14 @@ from hexdump import hexdump
 def crc32(data):
     return original_crc32(data) & 0xffffffff
 
+
 class MTProto:
+
     def __init__(self, api_secret, api_id):
         self.api_secret = api_secret
         self.api_id = api_id
         self.dc = Datacenter(0, Datacenter.DCs_test[1], 443)
+
 
 class Datacenter:
     DATA_VERSION = 4
@@ -143,12 +146,15 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
 
         encrypted_answer = server_DH_params.encrypted_answer
 
-        tmp_aes_key = SHA.new(new_nonce + resPQ.server_nonce).digest() + SHA.new(resPQ.server_nonce + new_nonce).digest()[0:12]
-        tmp_aes_iv = SHA.new(resPQ.server_nonce + new_nonce).digest()[12:20] + SHA.new(new_nonce + new_nonce).digest() + new_nonce[0:4]
+        tmp_aes_key = SHA.new(new_nonce + resPQ.server_nonce).digest() + SHA.new(resPQ.server_nonce + new_nonce)
+        tmp_aes_key = tmp_aes_key.digest()[0:12]
+
+        tmp_aes_iv = SHA.new(resPQ.server_nonce + new_nonce).digest()[12:20]
+        tmp_aes_iv = tmp_aes_iv + SHA.new(new_nonce + new_nonce).digest() + new_nonce[0:4]
 
         answer_with_hash = crypt.ige_decrypt(encrypted_answer, tmp_aes_key, tmp_aes_iv)
 
-        answer_hash = answer_with_hash[:20]
+        # answer_hash = answer_with_hash[:20]
         answer = answer_with_hash[20:]
 
         server_DH_inner_data = rpc.server_DH_inner_data(answer)
@@ -172,10 +178,11 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
 
         g_b_str = long_to_bytes(g_b)
 
-        client_DH_inner_data = rpc.client_DH_inner_data(nonce=resPQ.nonce,
-                                        server_nonce=resPQ.server_nonce,
-                                        retry_id=retry_id,
-                                        g_b=g_b_str)
+        client_DH_inner_data = rpc.client_DH_inner_data(
+            nonce=resPQ.nonce,
+            server_nonce=resPQ.server_nonce,
+            retry_id=retry_id,
+            g_b=g_b_str)
 
         data = client_DH_inner_data.get_bytes()
 
@@ -183,10 +190,11 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
         data_with_sha_padded = data_with_sha + os.urandom(-len(data_with_sha) % 16)
         encrypted_data = crypt.ige_encrypt(data_with_sha_padded, tmp_aes_key, tmp_aes_iv)
 
-        for i in range(1, self.AUTH_MAX_RETRY): # retry when dh_gen_retry or dh_gen_fail
-            set_client_DH_params = rpc.set_client_DH_params(nonce=resPQ.nonce,
-                                                            server_nonce=resPQ.server_nonce,
-                                                            encrypted_data=encrypted_data)
+        for i in range(1, self.AUTH_MAX_RETRY):  # retry when dh_gen_retry or dh_gen_fail
+            set_client_DH_params = rpc.set_client_DH_params(
+                nonce=resPQ.nonce,
+                server_nonce=resPQ.server_nonce,
+                encrypted_data=encrypted_data)
             self.send_message(set_client_DH_params.get_bytes())
             Set_client_DH_params_answer = rpc.set_client_DH_params_answer(self.recv_message())
 
@@ -214,7 +222,7 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
                 return "Auth Ok"
             elif Set_client_DH_params_answer.status == 'retry':
                 assert Set_client_DH_params_answer.new_nonce_hash == new_nonce_hash2
-                print ("Retry Auth")
+                print("Retry Auth")
             elif Set_client_DH_params_answer.status == 'fail':
                 assert Set_client_DH_params_answer.new_nonce_hash == new_nonce_hash3
                 print("Auth Failed")
@@ -263,7 +271,7 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
         # check the CRC32
         if not crc32(packet_length_data + packet[0:-4]) == struct.unpack('<I', packet[-4:])[0]:
             raise Exception("CRC32 was not correct!")
-        x = struct.unpack("<I", packet[:4])
+        # x = struct.unpack("<I", packet[:4])
         auth_key_id = packet[4:12]
         if auth_key_id == b'\x00\x00\x00\x00\x00\x00\x00\x00':
             # No encryption - Plain text
@@ -277,8 +285,8 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
             decrypted_data = crypt.ige_decrypt(encrypted_data, aes_key, aes_iv)
             assert decrypted_data[0:8] == self.server_salt
             assert decrypted_data[8:16] == self.session_id
-            message_id = decrypted_data[16:24]
-            seq_no = struct.unpack("<I", decrypted_data[24:28])[0]
+            # message_id = decrypted_data[16:24]
+            # seq_no = struct.unpack("<I", decrypted_data[24:28])[0]
             message_data_length = struct.unpack("<I", decrypted_data[28:32])[0]
             data = decrypted_data[32:32+message_data_length]
         else:
@@ -288,7 +296,6 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
     def __del__(self):
         # cleanup
         self.sock.close()
-
 
 
 if __name__ == "__main__":
