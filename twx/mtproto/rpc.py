@@ -198,6 +198,7 @@ class req_DH_params:
 
         return bytes_io.getvalue()
 
+
 class server_DH_params:
     constructor_ok = 0xd0e8075c
     constructor_fail = 0x79cb045d

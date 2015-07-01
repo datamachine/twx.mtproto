@@ -9,9 +9,9 @@ from Crypto.PublicKey import RSA
 from Crypto.Util.strxor import strxor
 from Crypto.Util.number import long_to_bytes, bytes_to_long
 
-from twx.mtproto import rpc
-from twx.mtproto import crypt
-from twx.mtproto import prime
+import rpc
+import crypt
+import prime
 
 from hexdump import hexdump
 
@@ -110,7 +110,7 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
         pq = bytes_to_long(resPQ.pq)
 
         [p, q] = prime.primefactors(pq)
-        (p, q) = (q, p) if p > q else (p, q)
+        (p, q) = (q, p) if p > q else (p, q)  # q must be > p, put in right order
         assert p*q == pq and p < q
 
         print("Factorization %d = %d * %d" % (pq, p, q))
@@ -129,10 +129,11 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
         assert p_q_inner_data.nonce == resPQ.nonce
 
         sha_digest = SHA.new(data).digest()
-        random_bytes = os.urandom(255-len(data)-len(sha_digest))
-        to_encrypt = sha_digest + data + random_bytes
-        encrypted_data = key.encrypt(to_encrypt, 0)[0]
+        random_bytes = os.urandom(255-len(data)-len(sha_digest))  # get padding of random data to fill what is left after data and sha_digest
+        to_encrypt = sha_digest + data + random_bytes  # encrypt cat of sha_digest, data, and padding
+        encrypted_data = key.encrypt(to_encrypt, 0)[0]  # rsa encrypt (key == RSA.key)
 
+        # Presenting proof of work; Server authentication
         req_DH_params = rpc.req_DH_params(p=p_bytes, q=q_bytes,
                                           nonce=resPQ.nonce,
                                           server_nonce=resPQ.server_nonce,
@@ -143,23 +144,25 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
         self.send_message(data)
         data = self.recv_message(debug=False)
 
+        # 5) Server responds in one of two ways:
         server_DH_params = rpc.server_DH_params(data)
         assert resPQ.nonce == server_DH_params.nonce
         assert resPQ.server_nonce == server_DH_params.server_nonce
 
         encrypted_answer = server_DH_params.encrypted_answer
 
-        tmp_aes_key = SHA.new(new_nonce + resPQ.server_nonce).digest() + SHA.new(resPQ.server_nonce + new_nonce)
-        tmp_aes_key = tmp_aes_key.digest()[0:12]
+        tmp_aes_key = SHA.new(new_nonce + resPQ.server_nonce).digest() + SHA.new(resPQ.server_nonce + new_nonce).digest()[0:12]
 
         tmp_aes_iv = SHA.new(resPQ.server_nonce + new_nonce).digest()[12:20]
         tmp_aes_iv = tmp_aes_iv + SHA.new(new_nonce + new_nonce).digest() + new_nonce[0:4]
 
         answer_with_hash = crypt.ige_decrypt(encrypted_answer, tmp_aes_key, tmp_aes_iv)
+        #                           ^--- decrypting here
 
         # answer_hash = answer_with_hash[:20]
-        answer = answer_with_hash[20:]
+        answer = answer_with_hash[20:]  # decrypted at this point
 
+        # server_DH_inner_data#b5890dba nonce:int128 server_nonce:int128 g:int dh_prime:string g_a:string server_time:int = Server_DH_inner_data;
         server_DH_inner_data = rpc.server_DH_inner_data(answer)
         assert resPQ.nonce == server_DH_inner_data.nonce
         assert resPQ.server_nonce == server_DH_inner_data.server_nonce
@@ -168,7 +171,7 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
         g = server_DH_inner_data.g
         g_a_str = server_DH_inner_data.g_a
         server_time = server_DH_inner_data.server_time
-        self.timedelta = server_time - time()
+        self.timedelta = server_time - time()  # keep in mind delta is used somewhere later
 
         dh_prime = bytes_to_long(dh_prime_str)
         g_a = bytes_to_long(g_a_str)
