@@ -95,6 +95,7 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
         # Handshake
         self.create_auth_key()
         print(self.auth_key)
+        print(self.server_salt)
 
     def create_auth_key(self):
         rand_nonce = os.urandom(16)
