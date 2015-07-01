@@ -151,7 +151,8 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
 
         encrypted_answer = server_DH_params.encrypted_answer
 
-        tmp_aes_key = SHA.new(new_nonce + resPQ.server_nonce).digest() + SHA.new(resPQ.server_nonce + new_nonce).digest()[0:12]
+        tmp_aes_key = SHA.new(new_nonce + resPQ.server_nonce).digest()
+        tmp_aes_key += SHA.new(resPQ.server_nonce + new_nonce).digest()[0:12]
 
         tmp_aes_iv = SHA.new(resPQ.server_nonce + new_nonce).digest()[12:20]
         tmp_aes_iv = tmp_aes_iv + SHA.new(new_nonce + new_nonce).digest() + new_nonce[0:4]
