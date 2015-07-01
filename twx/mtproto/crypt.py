@@ -12,11 +12,14 @@ from Crypto.Cipher import AES
 
 # AES 256 IGE part
 
+
 def ige_encrypt(message, key, iv):
     return _ige(message, key, iv, operation="encrypt")
 
+
 def ige_decrypt(message, key, iv):
     return _ige(message, key, iv, operation="decrypt")
+
 
 def _ige(message, key, iv, operation="decrypt"):
     """Given a key, given an iv, and message

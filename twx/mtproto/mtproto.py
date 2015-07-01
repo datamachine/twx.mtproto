@@ -17,7 +17,7 @@ from hexdump import hexdump
 
 
 def crc32(data):
-    return original_crc32(data) & 0xffffffff
+    return original_crc32(data) & 0xffffffff  # crc32 might be more than 32 bits because: CPython
 
 
 class MTProto:
@@ -100,7 +100,10 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
         rand_nonce = os.urandom(16)
         req_pq = rpc.req_pq(rand_nonce).get_bytes()
         self.send_message(req_pq)
+
+        # resPQ#05162463 nonce:int128 server_nonce:int128 pq:bytes server_public_key_fingerprints:Vector<long> = ResPQ;
         resPQ = rpc.resPQ(self.recv_message())
+
         assert rand_nonce == resPQ.nonce
 
         public_key_fingerprint = resPQ.server_public_key_fingerprints[0]
@@ -239,17 +242,27 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
 
         return msg_id
 
-    def send_message(self, message_data):
+    def send_message(self, message_data):  # package message, not chat message
+        # stage 1
+        # first one (e.g. req_PQ) message_data == constructor + 16 bytes
         message_id = self.generate_message_id()
-        message = (b'\x00\x00\x00\x00\x00\x00\x00\x00' +
-                   struct.pack('<Q', message_id) +
-                   struct.pack('<I', len(message_data)) +
-                   message_data)
-
+        message = (b'\x00\x00\x00\x00\x00\x00\x00\x00' +  # 8 nulls means unencrypted
+                   struct.pack('<Q', message_id) +  # message_id = generated unique sequencial ID
+                   struct.pack('<I', len(message_data)) +  # len of the API call (including message_data exclusively)
+                   message_data)  # actual RPC call
+        # stage 2
+        #                                 V------ message generated above
+        #                                          V------- + 12 to include len, msg_number, and checksum (i.e. total paket length)
+        #                                                   V--- gotta increment this shit every fucking packet
+        #                                                               V---- append existing byte string
         message = struct.pack('<II', len(message)+12, self.number) + message
+        #                   V---- calc chksum of stage 2
         msg_chksum = crc32(message)
+        # stage 3: append chksum to end
         message += struct.pack('<I', msg_chksum)
+        # ^-- raw data sent over socket
 
+        # yay!
         self.sock.send(message)
         self.number += 1
 

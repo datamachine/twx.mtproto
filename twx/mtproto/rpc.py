@@ -95,6 +95,7 @@ class resPQ:
     constructor = 0x05162463
 
     def __init__(self, data=None):
+        # handbuilt deserializer
         self.nonce = None
         self.server_nonce = None
         self.pq = None
@@ -111,10 +112,11 @@ class resPQ:
         self.nonce = bytes_io.read(16)
         self.server_nonce = bytes_io.read(16)
 
-        self.pq = deserialize_string(bytes_io)
+        self.pq = deserialize_string(bytes_io)  # why the fuck is pq: a string?
 
-        assert struct.unpack('<I', bytes_io.read(4))[0] == 0x1cb5c415  # long vector
-        count = struct.unpack('<l', bytes_io.read(4))[0]
+        assert struct.unpack('<I', bytes_io.read(4))[0] == 0x1cb5c415  # long vector (implicit bare type long)
+
+        count = struct.unpack('<l', bytes_io.read(4))[0]  # vectors, but so far only has len of 1
         for _ in range(count):
             self.server_public_key_fingerprints.append(struct.unpack('<q', bytes_io.read(8))[0])
 
