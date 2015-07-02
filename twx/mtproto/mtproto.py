@@ -1,23 +1,23 @@
 import os
 from socket import socket
 import struct
-from binascii import crc32 as original_crc32
 from time import time
+import zlib
 
 from Crypto.Hash import SHA
 from Crypto.PublicKey import RSA
 from Crypto.Util.strxor import strxor
 from Crypto.Util.number import long_to_bytes, bytes_to_long
 
-import rpc
-import crypt
-import prime
+from . import rpc
+from . import crypt
+from . import prime
 
 from hexdump import hexdump
 
 
 def crc32(data):
-    return original_crc32(data) & 0xffffffff  # crc32 might be more than 32 bits because: CPython
+    return zlib.crc32(data) & 0xffffffff  # crc32 might be more than 32 bits because: CPython
 
 
 class MTProto:
