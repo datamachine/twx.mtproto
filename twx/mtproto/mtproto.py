@@ -2,22 +2,24 @@ import os
 from socket import socket
 import struct
 from time import time
-import zlib
 
+from random import SystemRandom
 from Crypto.Hash import SHA
 from Crypto.PublicKey import RSA
 from Crypto.Util.strxor import strxor
 from Crypto.Util.number import long_to_bytes, bytes_to_long
 
+from . util import to_hex, crc32
+
 from . import rpc
 from . import crypt
 from . import prime
 
-from hexdump import hexdump
+from . import tl
 
-
-def crc32(data):
-    return zlib.crc32(data) & 0xffffffff  # crc32 might be more than 32 bits because: CPython
+import sys
+import logging
+log = logging.getLogger(__name__)
 
 
 class MTProto:
@@ -60,6 +62,8 @@ class Datacenter:
     ]
 
     def __init__(self, dc_id, ipaddr, port):
+        self.random = SystemRandom()
+
         self.ipaddr = ipaddr
         self.port = port
         self.datacenter_id = dc_id
@@ -97,22 +101,38 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
         print(self.auth_key)
         print(self.server_salt)
 
+    """
+    g = public (prime) base, known to Alice, Bob, and Eve. g = 5
+    p = public (prime) number, known to Alice, Bob, and Eve. p = 23
+    a = Alice's private key, known only to Alice. a = 6
+    b = Bob's private key known only to Bob. b = 15
+    """
+
+    def dh_exhange_initiation(self):
+        # 1) Client sends query to server
+        self._req_pq()
+
+    def _req_pq(self):
+        nonce = tl.int128(self.random.getrandbits(128))
+        request = tl.req_pq(nonce)
+        self.send_message(bytes(request))
+        res_pq = rpc.resPQ(self.recv_message())
+
+        assert nonce.value == int.from_bytes(res_pq.nonce, byteorder='little')
+
+        return res_pq
+
     def create_auth_key(self):
-        rand_nonce = os.urandom(16)
-        req_pq = rpc.req_pq(rand_nonce).get_bytes()
-        self.send_message(req_pq)
 
         # resPQ#05162463 nonce:int128 server_nonce:int128 pq:bytes server_public_key_fingerprints:Vector<long> = ResPQ;
-        resPQ = rpc.resPQ(self.recv_message())
-
-        assert rand_nonce == resPQ.nonce
+        resPQ = self._req_pq()
 
         public_key_fingerprint = resPQ.server_public_key_fingerprints[0]
         pq = bytes_to_long(resPQ.pq)
 
         [p, q] = prime.primefactors(pq)
         (p, q) = (q, p) if p > q else (p, q)  # q must be > p, put in right order
-        assert p*q == pq and p < q
+        assert p * q == pq and p < q
 
         print("Factorization %d = %d * %d" % (pq, p, q))
 
@@ -130,7 +150,8 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
         assert p_q_inner_data.nonce == resPQ.nonce
 
         sha_digest = SHA.new(data).digest()
-        random_bytes = os.urandom(255-len(data)-len(sha_digest))  # get padding of random data to fill what is left after data and sha_digest
+        # get padding of random data to fill what is left after data and sha_digest
+        random_bytes = os.urandom(255 - len(data) - len(sha_digest))
         to_encrypt = sha_digest + data + random_bytes  # encrypt cat of sha_digest, data, and padding
         encrypted_data = key.encrypt(to_encrypt, 0)[0]  # rsa encrypt (key == RSA.key)
 
@@ -194,7 +215,7 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
 
         data = client_DH_inner_data.get_bytes()
 
-        data_with_sha = SHA.new(data).digest()+data
+        data_with_sha = SHA.new(data).digest() + data
         data_with_sha_padded = data_with_sha + os.urandom(-len(data_with_sha) % 16)
         encrypted_data = crypt.ige_encrypt(data_with_sha_padded, tmp_aes_key, tmp_aes_iv)
 
@@ -316,5 +337,18 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
         self.sock.close()
 
 
-if __name__ == "__main__":
-    mtp = MTProto("FFFFFFFFF", "EEEEEEEE")
+class MTProtoClient:
+
+    def __init__(self, config):
+        from urllib.parse import urlsplit
+
+        self.api_id = config.get('app', 'api_id')
+        self.api_hash = config.get('app', 'api_hash')
+        self.app_title = config.get('app', 'app_title')
+        self.short_name = config.get('app', 'short_name')
+        self.public_keys = config.get('servers', 'public_keys')
+        self.test_dc = urlsplit(config.get('servers', 'test_dc'))
+
+    def init_connection(self):
+        ...
+        MTProto('FFFFFFFFF', 'EEEEEEEE')

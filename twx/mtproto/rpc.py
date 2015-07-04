@@ -3,6 +3,7 @@ import struct
 from io import BytesIO
 from hexdump import hexdump
 
+
 def vis(bs):
     """
     Function to visualize byte streams. Split into bytes, print to console.
@@ -82,7 +83,9 @@ class checkedPhone(TLObject):
     def set_params(self, data):
         (self.phone_registered, self.phone_invited) = struct.unpack(">??", data)
 
+
 class req_pq(TLObject):
+
     constructor = 0x60469778
 
     def __init__(self, nonce):

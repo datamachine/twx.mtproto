@@ -10,7 +10,11 @@ from __future__ import print_function
 from Crypto.Util.strxor import strxor
 from Crypto.Cipher import AES
 
+import logging
+log = logging.getLogger(__name__)
+
 # AES 256 IGE part
+
 
 
 def ige_encrypt(message, key, iv):
