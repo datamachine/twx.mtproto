@@ -9,6 +9,8 @@ from Crypto.PublicKey import RSA
 from Crypto.Util.strxor import strxor
 from Crypto.Util.number import long_to_bytes, bytes_to_long
 
+from io import BytesIO
+
 from . util import to_hex, crc32
 
 from . import rpc
@@ -68,9 +70,10 @@ class Datacenter:
         self.port = port
         self.datacenter_id = dc_id
         self.auth_server_salt_set = []
-        self.sock = socket()
-        self.sock.connect((ipaddr, port))
-        self.sock.settimeout(5.0)
+        self._socket = socket()
+        self._socket.connect((ipaddr, port))
+        self._socket.settimeout(5.0)
+        self.socket = self._socket.makefile(mode='rwb', buffering=0)
         self.message_queue = []
 
         self.last_msg_id = 0
@@ -115,10 +118,10 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
     def _req_pq(self):
         nonce = tl.int128(self.random.getrandbits(128))
         request = tl.req_pq(nonce)
-        self.send_message(bytes(request))
-        res_pq = rpc.resPQ(self.recv_message())
+        self.send_message(request.to_bytes())
+        res_pq = tl.ResPQ.from_stream(self.recv_message())
 
-        assert nonce.value == int.from_bytes(res_pq.nonce, byteorder='little')
+        assert nonce.value == res_pq.nonce.value
 
         return res_pq
 
@@ -127,8 +130,22 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
         # resPQ#05162463 nonce:int128 server_nonce:int128 pq:bytes server_public_key_fingerprints:Vector<long> = ResPQ;
         resPQ = self._req_pq()
 
-        public_key_fingerprint = resPQ.server_public_key_fingerprints[0]
-        pq = bytes_to_long(resPQ.pq)
+        public_key_fingerprint = resPQ.server_public_key_fingerprints.items[0]
+        pq1 = int.from_bytes(resPQ.pq, byteorder='big', signed=False)
+        pq2 = int.from_bytes(resPQ.pq, byteorder='big', signed=True)
+        pq3 = int.from_bytes(resPQ.pq, byteorder='little', signed=False)
+        pq4 = int.from_bytes(resPQ.pq, byteorder='little', signed=True)
+
+        print(resPQ, ...)
+
+        print(to_hex(resPQ.pq.value, 4), ...)
+
+        print(prime.primefactors(pq1), ...)
+        print(prime.primefactors(pq2), ...)
+        print(prime.primefactors(pq3), ...)
+        print(prime.primefactors(pq4), ...)
+        print(resPQ.hex_components(), ...)
+        sys.exit()
 
         [p, q] = prime.primefactors(pq)
         (p, q) = (q, p) if p > q else (p, q)  # q must be > p, put in right order
@@ -289,7 +306,7 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
         # ^-- raw data sent over socket
 
         # yay!
-        self.sock.send(message)
+        self.socket.write(message)
         self.number += 1
 
     def recv_message(self, debug=False):
@@ -300,12 +317,12 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
             packet = self.sock.recv(1024)  # reads how many bytes to read
             hexdump(packet)
 
-        packet_length_data = self.sock.recv(4)  # reads how many bytes to read
+        packet_length_data = self.socket.read(4)  # reads how many bytes to read
 
         if len(packet_length_data) < 4:
             raise Exception("Nothing in the socket!")
         packet_length = struct.unpack("<I", packet_length_data)[0]
-        packet = self.sock.recv(packet_length - 4)  # read the rest of bytes from socket
+        packet = self.socket.read(packet_length - 4)  # read the rest of bytes from socket
 
         # check the CRC32
         if not crc32(packet_length_data + packet[0:-4]) == struct.unpack('<I', packet[-4:])[0]:
@@ -315,9 +332,8 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
         if auth_key_id == b'\x00\x00\x00\x00\x00\x00\x00\x00':
             # No encryption - Plain text
             (message_id, message_length) = struct.unpack("<QI", packet[12:24])
-            data = packet[24:24+message_length]
+            return BytesIO(packet[24:24+message_length])
         elif auth_key_id == self.auth_key_id:
-            pass
             message_key = packet[12:28]
             encrypted_data = packet[28:-4]
             aes_key, aes_iv = self.aes_calculate(message_key, direction="from server")
@@ -327,14 +343,13 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
             # message_id = decrypted_data[16:24]
             # seq_no = struct.unpack("<I", decrypted_data[24:28])[0]
             message_data_length = struct.unpack("<I", decrypted_data[28:32])[0]
-            data = decrypted_data[32:32+message_data_length]
-        else:
-            raise Exception("Got unknown auth_key id")
-        return data
+            return BytesIO(decrypted_data[32:32+message_data_length])
+
+        raise Exception("Got unknown auth_key id")
 
     def __del__(self):
         # cleanup
-        self.sock.close()
+        self._socket.close()
 
 
 class MTProtoClient:
@@ -350,5 +365,4 @@ class MTProtoClient:
         self.test_dc = urlsplit(config.get('servers', 'test_dc'))
 
     def init_connection(self):
-        ...
         MTProto('FFFFFFFFF', 'EEEEEEEE')
