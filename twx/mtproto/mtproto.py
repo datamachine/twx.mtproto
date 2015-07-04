@@ -131,21 +131,7 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
         resPQ = self._req_pq()
 
         public_key_fingerprint = resPQ.server_public_key_fingerprints.items[0]
-        pq1 = int.from_bytes(resPQ.pq, byteorder='big', signed=False)
-        pq2 = int.from_bytes(resPQ.pq, byteorder='big', signed=True)
-        pq3 = int.from_bytes(resPQ.pq, byteorder='little', signed=False)
-        pq4 = int.from_bytes(resPQ.pq, byteorder='little', signed=True)
-
-        print(resPQ, ...)
-
-        print(to_hex(resPQ.pq.value, 4), ...)
-
-        print(prime.primefactors(pq1), ...)
-        print(prime.primefactors(pq2), ...)
-        print(prime.primefactors(pq3), ...)
-        print(prime.primefactors(pq4), ...)
-        print(resPQ.hex_components(), ...)
-        sys.exit()
+        pq = int.from_bytes(resPQ.pq.value, 'big')
 
         [p, q] = prime.primefactors(pq)
         (p, q) = (q, p) if p > q else (p, q)  # q must be > p, put in right order
@@ -157,6 +143,8 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
         q_bytes = long_to_bytes(q)
         key = RSA.importKey(self.rsa_key)
         new_nonce = os.urandom(32)
+
+        assert False, "TODO: Working up to here"
 
         p_q_inner_data = rpc.p_q_inner_data(pq=resPQ.pq, p=p_bytes, q=q_bytes,
                                             server_nonce=resPQ.server_nonce,
