@@ -24,6 +24,8 @@ class TLObject(metaclass=ABCMeta):
     __slots__ = ()
 
     def __bytes__(self):
+        # TODO: don't override bytes here, it prevents us from using tl.Bytes 
+        # and tl.String as though they are native python types
         return self.to_bytes()
 
     def to_bytes(self):
@@ -212,6 +214,29 @@ class string(_StringBase, TLConstructor):
 
         return string.__new__(string, str_bytes)
 
+    @staticmethod
+    def from_bytes(obj):
+        assert isinstance(obj, bytes)
+
+        len_pfx = len(obj)
+        if len_pfx < 254:
+            len_pfx = len_pfx.to_bytes(1, 'little')
+        else:
+            len_pfx = int(254).to_bytes(1, 'little') + len_pfx.to_bytes(3, 'little')
+
+        padding = bytes(4 - (len(len_pfx) + len(obj)) % 4)
+
+        value = b''.join([len_pfx, obj, padding])
+        assert len(value) % 4 == 0
+
+        return string.__new__(string, value)
+
+    @staticmethod
+    def from_int(obj):
+        assert isinstance(obj, int, length, byteorder, signed=False)
+
+        return string.from_bytes(obj.to_bytes(length, byteorder, signed=signed))
+
 
 class resPQ(_ResPQBase, TLConstructor):
 
@@ -265,3 +290,38 @@ class req_pq(namedtuple('req_pq', ['nonce', 'result_type']), TLCombinator):
     def _bytes(self):
         return [req_pq.number] + self.nonce._bytes()
 
+
+class p_q_inner_data:
+    """
+    p_q_inner_data#83c95aec pq:string p:string q:string nonce:int128 server_nonce:int128 new_nonce:int256 = P_Q_inner_data
+    """
+    def __new__(cls, *arg, **kwargs):
+        raise NotImplementedError()
+
+
+class p_q_inner_data_temp:
+    """
+    p_q_inner_data_temp#3c6a84d4 pq:string p:string q:string nonce:int128 server_nonce:int128 new_nonce:int256 expires_in:int = P_Q_inner_data;
+    """
+    def __new__(cls, *arg, **kwargs):
+        raise NotImplementedError()
+
+class req_DH_params(namedtuple('req_DH_params',
+    ['nonce', 'server_nonce', 'p', 'q', 'public_key_fingerprint', 'encrypted_data'])):
+
+    """
+    req_DH_params#d712e4be nonce:int128 server_nonce:int128 p:string q:string public_key_fingerprint:long encrypted_data:string = Server_DH_Params
+    """
+
+    def __new__(cls, nonce, server_nonce, p, q, public_key_fingerprint, encrypted_data):
+        return super(req_DH_params, cls).__new__(cls, nonce, server_nonce, p, q, public_key_fingerprint, encrypted_data)
+
+    def _bytes(self):
+        result = [req_DH_params]
+        result += self.nonce._bytes()
+        result += self.server_nonce._bytes()
+        result += self.p._bytes()
+        result += self.q._bytes()
+        result += self.public_key_fingerprint._bytes()
+        result += self.encrypted_data._bytes()
+        return result

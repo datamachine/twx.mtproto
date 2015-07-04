@@ -125,6 +125,18 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
 
         return res_pq
 
+    def _req_DH_params(self, resPQ):
+        pq = int.from_bytes(resPQ.pq.value, 'big')
+        p, q = prime.primefactors(pq)
+        if p > q:
+            p, q = q, p
+
+        assert p * q == pq
+        assert p < q
+
+        p = string.from_int(p, 8, 'big')
+        q = string.from_int(q, 8, 'big')
+
     def create_auth_key(self):
 
         # resPQ#05162463 nonce:int128 server_nonce:int128 pq:bytes server_public_key_fingerprints:Vector<long> = ResPQ;
@@ -143,6 +155,7 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
         q_bytes = long_to_bytes(q)
         key = RSA.importKey(self.rsa_key)
         new_nonce = os.urandom(32)
+
 
         assert False, "TODO: Working up to here"
 
