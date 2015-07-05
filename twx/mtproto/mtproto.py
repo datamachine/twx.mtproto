@@ -125,7 +125,7 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
 
         return res_pq
 
-    def _req_DH_params(self, resPQ):
+    def _req_inner_PQ_data(self, resPQ):
         pq = int.from_bytes(resPQ.pq.value, 'big')
         p, q = prime.primefactors(pq)
         if p > q:
@@ -137,25 +137,18 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
         p = string.from_int(p, 8, 'big')
         q = string.from_int(q, 8, 'big')
 
+        # TODO: user key passed from external source (e.g. config)
+        key = RSA.importKey(self.rsa_key)
+
+        new_nonce = self.random.getrandbits(128)
+
+        return tl.p_q_inner_data()
+
+
     def create_auth_key(self):
 
         # resPQ#05162463 nonce:int128 server_nonce:int128 pq:bytes server_public_key_fingerprints:Vector<long> = ResPQ;
         resPQ = self._req_pq()
-
-        public_key_fingerprint = resPQ.server_public_key_fingerprints.items[0]
-        pq = int.from_bytes(resPQ.pq.value, 'big')
-
-        [p, q] = prime.primefactors(pq)
-        (p, q) = (q, p) if p > q else (p, q)  # q must be > p, put in right order
-        assert p * q == pq and p < q
-
-        print("Factorization %d = %d * %d" % (pq, p, q))
-
-        p_bytes = long_to_bytes(p)
-        q_bytes = long_to_bytes(q)
-        key = RSA.importKey(self.rsa_key)
-        new_nonce = os.urandom(32)
-
 
         assert False, "TODO: Working up to here"
 

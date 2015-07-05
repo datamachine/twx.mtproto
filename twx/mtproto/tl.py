@@ -23,11 +23,6 @@ class TLObject(metaclass=ABCMeta):
 
     __slots__ = ()
 
-    def __bytes__(self):
-        # TODO: don't override bytes here, it prevents us from using tl.Bytes 
-        # and tl.String as though they are native python types
-        return self.to_bytes()
-
     def to_bytes(self):
         return b''.join(self._bytes())
 
@@ -109,8 +104,12 @@ class TLCombinator(TLObject):
 
 
 class TLConstructor(TLCombinator):
-    ...
 
+    def _bytes(self, boxed=False):
+        result = [self.number] if boxed else []
+        for arg in self:
+            result += arg._bytes()
+        return result
 
 class long(_LongBase, TLConstructor):
 
@@ -234,7 +233,6 @@ class string(_StringBase, TLConstructor):
     @staticmethod
     def from_int(obj):
         assert isinstance(obj, int, length, byteorder, signed=False)
-
         return string.from_bytes(obj.to_bytes(length, byteorder, signed=signed))
 
 
@@ -255,48 +253,18 @@ class resPQ(_ResPQBase, TLConstructor):
         server_nonce = int128.from_stream(stream)
         pq = string.from_stream(stream)
         server_public_key_fingerprints = Vector.from_stream(stream, long)
-
         return resPQ.__new__(resPQ, nonce, server_nonce, pq, server_public_key_fingerprints)
-
-    def _bytes(self, boxed=False):
-        result = [self.number] if boxed else []
-        return result + self.nonce._bytes() + self.server_nonce._bytes() + self.pq._bytes() + self.server_public_key_fingerprints._bytes()
-
 ResPQ.add_constuctor(resPQ)
 
 
-"""
----functions---
-"""
-
-
-class TLFunction(TLCombinator):
-
-    @abstractmethod
-    def _bytes(self):
-        """all functions must return boxed bytes (i.e. the start with their combinator number)"""
-        raise NotImplementedError()
-
-
-class req_pq(namedtuple('req_pq', ['nonce', 'result_type']), TLCombinator):
-
-    """req_pq#60469778 nonce:int128 = ResPQ"""
-
-    number = int(0x60469778).to_bytes(4, byteorder='little')
-
-    def __new__(cls, nonce, result_type=resPQ):
-        return super(req_pq, cls).__new__(cls, nonce, result_type)
-
-    def _bytes(self):
-        return [req_pq.number] + self.nonce._bytes()
-
 
 class p_q_inner_data:
+
     """
     p_q_inner_data#83c95aec pq:string p:string q:string nonce:int128 server_nonce:int128 new_nonce:int256 = P_Q_inner_data
     """
-    def __new__(cls, *arg, **kwargs):
-        raise NotImplementedError()
+
+    number = int(0x83c95aec).to_bytes(4, 'little')
 
 
 class p_q_inner_data_temp:
@@ -305,6 +273,30 @@ class p_q_inner_data_temp:
     """
     def __new__(cls, *arg, **kwargs):
         raise NotImplementedError()
+
+"""
+---functions---
+"""
+
+
+class TLFunction(TLCombinator):
+
+    def _bytes(self):
+        result = [self.number]
+        for arg in self:
+            result += arg._bytes()
+        return result
+
+
+class req_pq(namedtuple('req_pq', ['nonce']), TLFunction):
+
+    """req_pq#60469778 nonce:int128 = ResPQ"""
+
+    number = int(0x60469778).to_bytes(4, byteorder='little')
+
+    def __new__(cls, nonce):
+        return super(req_pq, cls).__new__(cls, nonce)
+
 
 class req_DH_params(namedtuple('req_DH_params',
     ['nonce', 'server_nonce', 'p', 'q', 'public_key_fingerprint', 'encrypted_data'])):
@@ -315,13 +307,3 @@ class req_DH_params(namedtuple('req_DH_params',
 
     def __new__(cls, nonce, server_nonce, p, q, public_key_fingerprint, encrypted_data):
         return super(req_DH_params, cls).__new__(cls, nonce, server_nonce, p, q, public_key_fingerprint, encrypted_data)
-
-    def _bytes(self):
-        result = [req_DH_params]
-        result += self.nonce._bytes()
-        result += self.server_nonce._bytes()
-        result += self.p._bytes()
-        result += self.q._bytes()
-        result += self.public_key_fingerprint._bytes()
-        result += self.encrypted_data._bytes()
-        return result
