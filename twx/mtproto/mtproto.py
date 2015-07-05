@@ -134,8 +134,8 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
         assert p * q == pq
         assert p < q
 
-        p = string.from_int(p, 8, 'big')
-        q = string.from_int(q, 8, 'big')
+        p = tl.string.from_int(p, 8, 'big')
+        q = tl.string.from_int(q, 8, 'big')
 
         # TODO: user key passed from external source (e.g. config)
         key = RSA.importKey(self.rsa_key)
@@ -149,6 +149,7 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
 
         # resPQ#05162463 nonce:int128 server_nonce:int128 pq:bytes server_public_key_fingerprints:Vector<long> = ResPQ;
         resPQ = self._req_pq()
+        self._req_inner_PQ_data(resPQ)
 
         assert False, "TODO: Working up to here"
 

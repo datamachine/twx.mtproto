@@ -54,14 +54,14 @@ class TLType:
         raise SyntaxError("Do not use this class directly, call from_stream")
 
     @classmethod
-    def from_stream(cls, stream, *args):
+    def from_stream(cls, stream):
         """Boxed type combinator loading"""
         con_num = stream.read(4)
         con = cls.constructors.get(con_num)
         if con is None:
             raise ValueError('{} does not have combinator with number {}'.format(cls, to_hex(con_num)))
 
-        return con.from_stream(stream, *args)
+        return con.from_stream(stream)
 
     @classmethod
     def add_constuctor(cls, constructor_cls):
@@ -76,6 +76,20 @@ Double = type('Double', (TLType,), {})
 String = type('String', (TLType,), {})
 
 Vector = type('Vector', (TLType,), {})
+
+
+class Vector(TLType):
+
+    @classmethod
+    def from_stream(cls, stream):
+        """Boxed type combinator loading"""
+        con_num = stream.read(4)
+        con = cls.constructors.get(con_num)
+        if con is None:
+            raise ValueError('{} does not have combinator with number {}'.format(cls, to_hex(con_num)))
+
+        return con.from_stream(stream, cls.item_cls)
+
 
 Int128 = type('Int128', (TLType,), {})
 Int256 = type('Int256', (TLType,), {})
@@ -102,6 +116,9 @@ class TLCombinator(TLObject):
             return to_hex(self.to_boxed_bytes(), width)
         return to_hex(self.to_bytes(), width)
 
+    def _bytes(self):
+        raise NotImplementedError()
+
 
 class TLConstructor(TLCombinator):
 
@@ -110,6 +127,12 @@ class TLConstructor(TLCombinator):
         for arg in self:
             result += arg._bytes()
         return result
+
+    @classmethod
+    def from_stream(cls, stream):
+        params = [p.from_stream(stream) for p in cls.params]
+        return cls.__new__(cls, *params)
+
 
 class long(_LongBase, TLConstructor):
 
@@ -143,12 +166,12 @@ class vector(_VectorBase, TLConstructor):
         return [item.to_bytes() for item in self.items]
 
     @staticmethod
-    def from_stream(stream, item_type):
+    def from_stream(stream, item_cls):
         count = int.from_bytes(stream.read(4), 'little')
         items = []
         for i in iter(range(count)):
-            items.append(item_type.from_stream(stream))
-        return vector.__new__(vector, item_type, count, items)
+            items.append(item_cls.from_stream(stream))
+        return vector.__new__(vector, item_cls, count, items)
 Vector.add_constuctor(vector)
 
 
@@ -231,8 +254,8 @@ class string(_StringBase, TLConstructor):
         return string.__new__(string, value)
 
     @staticmethod
-    def from_int(obj):
-        assert isinstance(obj, int, length, byteorder, signed=False)
+    def from_int(obj, length, byteorder, signed=False):
+        assert isinstance(obj, int)
         return string.from_bytes(obj.to_bytes(length, byteorder, signed=signed))
 
 
@@ -244,18 +267,11 @@ class resPQ(_ResPQBase, TLConstructor):
     """
 
     number = int(0x05162463).to_bytes(4, 'little')
+    params = _ResPQBase(int128, int128, string, type('Vector', (Vector,), dict(item_cls=long)))
 
     __slot__ = ()
 
-    @staticmethod
-    def from_stream(stream):
-        nonce = int128.from_stream(stream)
-        server_nonce = int128.from_stream(stream)
-        pq = string.from_stream(stream)
-        server_public_key_fingerprints = Vector.from_stream(stream, long)
-        return resPQ.__new__(resPQ, nonce, server_nonce, pq, server_public_key_fingerprints)
 ResPQ.add_constuctor(resPQ)
-
 
 
 class p_q_inner_data:
@@ -266,13 +282,21 @@ class p_q_inner_data:
 
     number = int(0x83c95aec).to_bytes(4, 'little')
 
+    def __new__(cls, *args, **kwargs):
+        raise NotImplementedError()
+
 
 class p_q_inner_data_temp:
+
     """
     p_q_inner_data_temp#3c6a84d4 pq:string p:string q:string nonce:int128 server_nonce:int128 new_nonce:int256 expires_in:int = P_Q_inner_data;
     """
-    def __new__(cls, *arg, **kwargs):
+
+    number = int(0x3c6a84d4).to_bytes(4, 'little')
+
+    def __new__(cls, *args, **kwargs):
         raise NotImplementedError()
+
 
 """
 ---functions---
