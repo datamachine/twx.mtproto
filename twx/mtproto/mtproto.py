@@ -119,6 +119,7 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
         nonce = tl.int128(self.random.getrandbits(128))
         request = tl.req_pq(nonce)
         self.send_message(request.to_bytes())
+        print(tl.ResPQ, ...)
         res_pq = tl.ResPQ.from_stream(self.recv_message())
 
         assert nonce.value == res_pq.nonce.value
@@ -138,25 +139,24 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
         q = tl.string.from_int(q, 8, 'big')
 
         # TODO: user key passed from external source (e.g. config)
-        key = RSA.importKey(self.rsa_key)
+        #key = tl.string.from_bytes(RSA.importKey(self.rsa_key))
 
-        new_nonce = self.random.getrandbits(128)
+        new_nonce = tl.int256(self.random.getrandbits(256))
 
-        return tl.p_q_inner_data()
+        return tl.p_q_inner_data(resPQ.pq, p, q, resPQ.nonce, resPQ.server_nonce, new_nonce)
 
 
     def create_auth_key(self):
 
         # resPQ#05162463 nonce:int128 server_nonce:int128 pq:bytes server_public_key_fingerprints:Vector<long> = ResPQ;
         resPQ = self._req_pq()
-        self._req_inner_PQ_data(resPQ)
+        print(resPQ.hex_components())
+
+        p_q_inner_data = self._req_inner_PQ_data(resPQ)
+
+        print(p_q_inner_data.hex_components())
 
         assert False, "TODO: Working up to here"
-
-        p_q_inner_data = rpc.p_q_inner_data(pq=resPQ.pq, p=p_bytes, q=q_bytes,
-                                            server_nonce=resPQ.server_nonce,
-                                            nonce=resPQ.nonce,
-                                            new_nonce=new_nonce)
 
         data = p_q_inner_data.get_bytes()
         assert p_q_inner_data.nonce == resPQ.nonce

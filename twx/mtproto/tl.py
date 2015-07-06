@@ -2,6 +2,7 @@ from abc import ABCMeta, abstractmethod, abstractstaticmethod
 from collections import namedtuple
 from functools import partial
 from enum import Enum
+from collections import OrderedDict
 
 from . util import to_hex, crc32
 
@@ -40,21 +41,22 @@ _LongBase = namedtuple('long', 'value')
 _DoubleBase = namedtuple('double', 'value')
 _StringBase = namedtuple('String', 'value')
 
-_Int128Base = namedtuple('Int128', 'value')
-_Int256Base = namedtuple('Int256', 'value')
 
-_ResPQBase = namedtuple('ResPQ', ['nonce', 'server_nonce', 'pq', 'server_public_key_fingerprints'])
-
-_VectorBase = namedtuple('Vector', ('type', 'count', 'items'))
+_VectorBase = namedtuple('Vector', ('t', 'num', 'items'))
 
 
 class TLType:
 
     def __new__(cls, *args, **kwargs):
+        if issubclass(cls, Vector):
+            return super(TLType, cls).__new__(cls)
+
         raise SyntaxError("Do not use this class directly, call from_stream")
+
 
     @classmethod
     def from_stream(cls, stream):
+        print(cls, ...)
         """Boxed type combinator loading"""
         con_num = stream.read(4)
         con = cls.constructors.get(con_num)
@@ -75,26 +77,31 @@ Long = type('Long', (TLType,), {})
 Double = type('Double', (TLType,), {})
 String = type('String', (TLType,), {})
 
-Vector = type('Vector', (TLType,), {})
-
 
 class Vector(TLType):
 
-    @classmethod
-    def from_stream(cls, stream):
+    __slots__ = ('t')
+
+    def __new__(cls, t):
+        result = super(Vector, cls).__new__(cls, allow_new=True)
+        result.t = t
+        return result
+
+    def __init__(self, t):
+        pass
+
+    def from_stream(self, stream):
         """Boxed type combinator loading"""
         con_num = stream.read(4)
-        con = cls.constructors.get(con_num)
+        con = self.constructors.get(con_num)
         if con is None:
-            raise ValueError('{} does not have combinator with number {}'.format(cls, to_hex(con_num)))
+            raise ValueError('{} does not have combinator with number {}'.format(self, to_hex(con_num)))
 
-        return con.from_stream(stream, cls.item_cls)
+        return con.from_stream(stream, self.t)
 
 
-Int128 = type('Int128', (TLType,), {})
-Int256 = type('Int256', (TLType,), {})
-
-ResPQ = type('ResPQ', (TLType,), {})
+_P_Q_inner_dataBase = namedtuple('P_Q_inner_data', ['pq', 'p', 'q', 'nonce', 'server_nonce', 'new_nonce'])
+P_Q_inner_data = type('P_Q_inner_data', (TLType,), {})
 
 
 """
@@ -130,9 +137,22 @@ class TLConstructor(TLCombinator):
 
     @classmethod
     def from_stream(cls, stream):
-        params = [p.from_stream(stream) for p in cls.params]
-        return cls.__new__(cls, *params)
+        args = [p.from_stream(stream) for p in cls.param_types]
+        return cls.__new__(cls, *args)
 
+def create_constructor(name, number, params, param_types, result_type):
+    params = namedtuple(name, params)
+    class_bases = (params, TLConstructor)
+    class_body = dict(
+        name=name,
+        number=number.to_bytes(4, 'little'),
+        params=params,
+        param_types=params(*list(param_types)),
+        result_type=result_type
+        )
+    new_type = type(name, class_bases, class_body)
+    result_type.add_constuctor(new_type)
+    return new_type
 
 class long(_LongBase, TLConstructor):
 
@@ -152,8 +172,8 @@ class long(_LongBase, TLConstructor):
         result = long.__new__(long, _int)
         return result
 
-    @staticmethod
-    def from_stream(stream):
+    @classmethod
+    def from_stream(cls, stream):
         return long.from_int(int.from_bytes(stream.read(8), byteorder='little'))
 Long.add_constuctor(long)
 
@@ -166,22 +186,25 @@ class vector(_VectorBase, TLConstructor):
         return [item.to_bytes() for item in self.items]
 
     @staticmethod
-    def from_stream(stream, item_cls):
-        count = int.from_bytes(stream.read(4), 'little')
+    def from_stream(stream, t):
+        print('building', ...)
+        num = int.from_bytes(stream.read(4), 'little')
         items = []
-        for i in iter(range(count)):
-            items.append(item_cls.from_stream(stream))
-        return vector.__new__(vector, item_cls, count, items)
+        for i in iter(range(num)):
+            items.append(t.from_stream(stream))
+        return vector.__new__(vector, t, num, items)
 Vector.add_constuctor(vector)
 
+"""
+int128 4*[ int ] = Int128
+int256 8*[ int ] = Int256
+"""
+_Int128Base = namedtuple('Int128', 'value')
+_Int256Base = namedtuple('Int256', 'value')
+Int128 = type('Int128', (TLType,), {})
+Int256 = type('Int256', (TLType,), {})
 
 class int128(_Int128Base, TLConstructor):
-
-    """
-    int ? = Int
-    """
-
-    __slots__ = ()
 
     number = crc32('int 4*[ int ] = Int128'.encode()).to_bytes(4, 'little')
 
@@ -193,15 +216,29 @@ class int128(_Int128Base, TLConstructor):
         result = int128.__new__(int128, _int)
         return result
 
-    @staticmethod
-    def from_stream(stream, boxed=False):
+    @classmethod
+    def from_stream(cls, stream, boxed=False):
         return int128.from_int(int.from_bytes(stream.read(16), byteorder='little'))
+
+class int256(_Int128Base, TLConstructor):
+
+    number = crc32('int 4*[ int ] = Int128'.encode()).to_bytes(4, 'little')
+
+    def _bytes(self):
+        return [self.value.to_bytes(32, 'little')]
+
+    @staticmethod
+    def from_int(_int):
+        result = int128.__new__(int128, _int)
+        return result
+
+    @classmethod
+    def from_stream(cls, stream, boxed=False):
+        return int128.from_int(int.from_bytes(stream.read(32), byteorder='little'))
+Int256.add_constuctor(int256)
 
 
 class string(_StringBase, TLConstructor):
-
-    def __str__(self):
-        return self.value.encode()
 
     def _bytes(self):
         str_bytes = bytes(self.value)
@@ -217,8 +254,8 @@ class string(_StringBase, TLConstructor):
 
         return [length + str_bytes + padding]
 
-    @staticmethod
-    def from_stream(stream):
+    @classmethod
+    def from_stream(cls, stream):
         count = 0
 
         str_len = int.from_bytes(stream.read(1), 'little')
@@ -258,44 +295,38 @@ class string(_StringBase, TLConstructor):
         assert isinstance(obj, int)
         return string.from_bytes(obj.to_bytes(length, byteorder, signed=signed))
 
+"""
+type: ResPQ
+constructors:
+    resPQ#05162463 nonce:int128 server_nonce:int128 pq:string server_public_key_fingerprints:Vector long = ResPQ
+"""
+ResPQ = type('ResPQ', (TLType,), {})
 
-class resPQ(_ResPQBase, TLConstructor):
+resPQ = create_constructor(
+    name='resPQ', number=0x05162463,
+    params=['nonce', 'server_nonce', 'pq', 'server_public_key_fingerprints'],
+    param_types=[int128, int128, string, Vector(long)],
+    result_type=ResPQ)
 
-    """
-    resPQ#05162463 nonce:int128 server_nonce:int128 pq:string
-                   server_public_key_fingerprints:Vector long = ResPQ
-    """
-
-    number = int(0x05162463).to_bytes(4, 'little')
-    params = _ResPQBase(int128, int128, string, type('Vector', (Vector,), dict(item_cls=long)))
-
-    __slot__ = ()
-
-ResPQ.add_constuctor(resPQ)
-
-
-class p_q_inner_data:
-
-    """
+"""
+type: P_Q_inner_data
+constructors:
     p_q_inner_data#83c95aec pq:string p:string q:string nonce:int128 server_nonce:int128 new_nonce:int256 = P_Q_inner_data
-    """
-
-    number = int(0x83c95aec).to_bytes(4, 'little')
-
-    def __new__(cls, *args, **kwargs):
-        raise NotImplementedError()
-
-
-class p_q_inner_data_temp:
-
-    """
     p_q_inner_data_temp#3c6a84d4 pq:string p:string q:string nonce:int128 server_nonce:int128 new_nonce:int256 expires_in:int = P_Q_inner_data;
-    """
+"""
+P_Q_inner_data = type('P_Q_inner_data', (TLType,), dict())
 
-    number = int(0x3c6a84d4).to_bytes(4, 'little')
+p_q_inner_data = create_constructor(
+    name='p_q_inner_data', number=0x83c95aec,
+    params=['pq', 'p', 'q', 'nonce', 'server_nonce', 'new_nonce'],
+    param_types=[string, string, string, int128, int128, int256],
+    result_type=P_Q_inner_data)
 
-    def __new__(cls, *args, **kwargs):
-        raise NotImplementedError()
+p_q_inner_data_temp = create_constructor(
+    name='p_q_inner_data_temp', number=0x3c6a84d4,
+    params=['pq', 'p', 'q', 'nonce', 'server_nonce', 'new_nonce', 'expires_in'],
+    param_types=[string, string, string, int128, int128, int256, int],
+    result_type=P_Q_inner_data)
 
 
 """
@@ -317,9 +348,7 @@ class req_pq(namedtuple('req_pq', ['nonce']), TLFunction):
     """req_pq#60469778 nonce:int128 = ResPQ"""
 
     number = int(0x60469778).to_bytes(4, byteorder='little')
-
-    def __new__(cls, nonce):
-        return super(req_pq, cls).__new__(cls, nonce)
+    ...
 
 
 class req_DH_params(namedtuple('req_DH_params',
@@ -328,6 +357,4 @@ class req_DH_params(namedtuple('req_DH_params',
     """
     req_DH_params#d712e4be nonce:int128 server_nonce:int128 p:string q:string public_key_fingerprint:long encrypted_data:string = Server_DH_Params
     """
-
-    def __new__(cls, nonce, server_nonce, p, q, public_key_fingerprint, encrypted_data):
-        return super(req_DH_params, cls).__new__(cls, nonce, server_nonce, p, q, public_key_fingerprint, encrypted_data)
+    ...
