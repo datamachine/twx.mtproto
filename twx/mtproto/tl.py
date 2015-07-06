@@ -296,6 +296,8 @@ class string_c(_StringBase, TLConstructor):
         assert isinstance(obj, int)
         return string_c.from_bytes(obj.to_bytes(length, byteorder, signed=signed))
 
+bytes_c = string_c
+
 """
 type: ResPQ
 constructors:
@@ -329,6 +331,24 @@ p_q_inner_data_temp = create_constructor(
     param_types=[string_c, string_c, string_c, int128_c, int128_c, int256_c, int],
     result_type=P_Q_inner_data)
 
+"""
+server_DH_params_fail#79cb045d nonce:int128 server_nonce:int128 new_nonce_hash:int128 = Server_DH_Params;
+server_DH_params_ok#d0e8075c nonce:int128 server_nonce:int128 encrypted_answer:bytes = Server_DH_Params;
+"""
+
+Server_DH_Params = type('Server_DH_Params', (TLType,), {})
+
+server_DH_params_fail_c = create_constructor(
+    name='server_DH_params_fail', number=0x79cb045d,
+    params=['nonce', 'server_nonce', 'new_nonce_hash'],
+    param_types=[int128_c, int128_c, int128_c],
+    result_type=Server_DH_Params)
+
+server_DH_params_ok_c = create_constructor(
+    name='server_DH_params_ok', number=0xd0e8075c,
+    params=['nonce', 'server_nonce', 'encrypted_answer'],
+    param_types=[int128_c, int128_c, bytes_c],
+    result_type=Server_DH_Params)
 
 """
 ---functions---
