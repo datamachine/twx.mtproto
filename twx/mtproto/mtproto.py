@@ -116,7 +116,7 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
         self._req_pq()
 
     def _req_pq(self):
-        nonce = tl.int128(self.random.getrandbits(128))
+        nonce = tl.int128_c(self.random.getrandbits(128))
         request = tl.req_pq(nonce)
         self.send_message(request.to_bytes())
         print(tl.ResPQ, ...)
@@ -135,15 +135,15 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
         assert p * q == pq
         assert p < q
 
-        p = tl.string.from_int(p, 8, 'big')
-        q = tl.string.from_int(q, 8, 'big')
+        p = tl.string_c.from_int(p, 8, 'big')
+        q = tl.string_c.from_int(q, 8, 'big')
 
         # TODO: user key passed from external source (e.g. config)
         #key = tl.string.from_bytes(RSA.importKey(self.rsa_key))
 
-        new_nonce = tl.int256(self.random.getrandbits(256))
+        new_nonce = tl.int256_c(self.random.getrandbits(256))
 
-        return tl.p_q_inner_data(resPQ.pq, p, q, resPQ.nonce, resPQ.server_nonce, new_nonce)
+        return tl.p_q_inner_data_c(resPQ.pq, p, q, resPQ.nonce, resPQ.server_nonce, new_nonce)
 
 
     def create_auth_key(self):

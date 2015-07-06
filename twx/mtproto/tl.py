@@ -154,7 +154,7 @@ def create_constructor(name, number, params, param_types, result_type):
     result_type.add_constuctor(new_type)
     return new_type
 
-class long(_LongBase, TLConstructor):
+class long_c(_LongBase, TLConstructor):
 
     """
     int ? = Int
@@ -162,23 +162,23 @@ class long(_LongBase, TLConstructor):
 
     __slots__ = ()
 
-    number = crc32('long ? = long'.encode()).to_bytes(4, 'little')
+    number = crc32('long ? = Long'.encode()).to_bytes(4, 'little')
 
     def _bytes(self):
         return [self.value.to_bytes(8, 'little')]
 
     @staticmethod
     def from_int(_int):
-        result = long.__new__(long, _int)
+        result = long_c.__new__(long_c, _int)
         return result
 
     @classmethod
     def from_stream(cls, stream):
-        return long.from_int(int.from_bytes(stream.read(8), byteorder='little'))
-Long.add_constuctor(long)
+        return long_c.from_int(int.from_bytes(stream.read(8), byteorder='little'))
+Long.add_constuctor(long_c)
 
 
-class vector(_VectorBase, TLConstructor):
+class vector_c(_VectorBase, TLConstructor):
 
     number = int(0x1cb5c415).to_bytes(4, 'little')
 
@@ -192,19 +192,20 @@ class vector(_VectorBase, TLConstructor):
         items = []
         for i in iter(range(num)):
             items.append(t.from_stream(stream))
-        return vector.__new__(vector, t, num, items)
-Vector.add_constuctor(vector)
+        return vector_c.__new__(vector_c, t, num, items)
+Vector.add_constuctor(vector_c)
 
 """
 int128 4*[ int ] = Int128
 int256 8*[ int ] = Int256
 """
-_Int128Base = namedtuple('Int128', 'value')
-_Int256Base = namedtuple('Int256', 'value')
 Int128 = type('Int128', (TLType,), {})
 Int256 = type('Int256', (TLType,), {})
 
-class int128(_Int128Base, TLConstructor):
+_Int128Base = namedtuple('Int128', 'value')
+_Int256Base = namedtuple('Int256', 'value')
+
+class int128_c(_Int128Base, TLConstructor):
 
     number = crc32('int 4*[ int ] = Int128'.encode()).to_bytes(4, 'little')
 
@@ -213,14 +214,14 @@ class int128(_Int128Base, TLConstructor):
 
     @staticmethod
     def from_int(_int):
-        result = int128.__new__(int128, _int)
+        result = int128_c.__new__(int128_c, _int)
         return result
 
     @classmethod
     def from_stream(cls, stream, boxed=False):
-        return int128.from_int(int.from_bytes(stream.read(16), byteorder='little'))
+        return int128_c.from_int(int.from_bytes(stream.read(16), byteorder='little'))
 
-class int256(_Int128Base, TLConstructor):
+class int256_c(_Int128Base, TLConstructor):
 
     number = crc32('int 4*[ int ] = Int128'.encode()).to_bytes(4, 'little')
 
@@ -229,16 +230,16 @@ class int256(_Int128Base, TLConstructor):
 
     @staticmethod
     def from_int(_int):
-        result = int128.__new__(int128, _int)
+        result = int128_c.__new__(int128_c, _int)
         return result
 
     @classmethod
     def from_stream(cls, stream, boxed=False):
-        return int128.from_int(int.from_bytes(stream.read(32), byteorder='little'))
-Int256.add_constuctor(int256)
+        return int128_c.from_int(int.from_bytes(stream.read(32), byteorder='little'))
+Int256.add_constuctor(int256_c)
 
 
-class string(_StringBase, TLConstructor):
+class string_c(_StringBase, TLConstructor):
 
     def _bytes(self):
         str_bytes = bytes(self.value)
@@ -271,7 +272,7 @@ class string(_StringBase, TLConstructor):
         # get rid of the padded bytes
         stream.read(4 - count % 4)
 
-        return string.__new__(string, str_bytes)
+        return string_c.__new__(string_c, str_bytes)
 
     @staticmethod
     def from_bytes(obj):
@@ -288,12 +289,12 @@ class string(_StringBase, TLConstructor):
         value = b''.join([len_pfx, obj, padding])
         assert len(value) % 4 == 0
 
-        return string.__new__(string, value)
+        return string_c.__new__(string_c, value)
 
     @staticmethod
     def from_int(obj, length, byteorder, signed=False):
         assert isinstance(obj, int)
-        return string.from_bytes(obj.to_bytes(length, byteorder, signed=signed))
+        return string_c.from_bytes(obj.to_bytes(length, byteorder, signed=signed))
 
 """
 type: ResPQ
@@ -302,10 +303,10 @@ constructors:
 """
 ResPQ = type('ResPQ', (TLType,), {})
 
-resPQ = create_constructor(
+resPQ_c = create_constructor(
     name='resPQ', number=0x05162463,
     params=['nonce', 'server_nonce', 'pq', 'server_public_key_fingerprints'],
-    param_types=[int128, int128, string, Vector(long)],
+    param_types=[int128_c, int128_c, string_c, Vector(long_c)],
     result_type=ResPQ)
 
 """
@@ -316,16 +317,16 @@ constructors:
 """
 P_Q_inner_data = type('P_Q_inner_data', (TLType,), dict())
 
-p_q_inner_data = create_constructor(
+p_q_inner_data_c = create_constructor(
     name='p_q_inner_data', number=0x83c95aec,
     params=['pq', 'p', 'q', 'nonce', 'server_nonce', 'new_nonce'],
-    param_types=[string, string, string, int128, int128, int256],
+    param_types=[string_c, string_c, string_c, int128_c, int128_c, int256_c],
     result_type=P_Q_inner_data)
 
 p_q_inner_data_temp = create_constructor(
     name='p_q_inner_data_temp', number=0x3c6a84d4,
     params=['pq', 'p', 'q', 'nonce', 'server_nonce', 'new_nonce', 'expires_in'],
-    param_types=[string, string, string, int128, int128, int256, int],
+    param_types=[string_c, string_c, string_c, int128_c, int128_c, int256_c, int],
     result_type=P_Q_inner_data)
 
 
