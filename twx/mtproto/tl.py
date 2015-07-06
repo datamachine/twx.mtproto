@@ -53,7 +53,6 @@ class TLType:
 
         raise SyntaxError("Do not use this class directly, call from_stream")
 
-
     @classmethod
     def from_stream(cls, stream):
         print(cls, ...)
@@ -67,18 +66,18 @@ class TLType:
 
     @classmethod
     def add_constuctor(cls, constructor_cls):
-        if not hasattr(cls, 'constructors'):
-            setattr(cls, 'constructors', {})
         cls.constructors[constructor_cls.number] = constructor_cls
 
 
-Int = type('Int', (TLType,), {})
-Long = type('Long', (TLType,), {})
-Double = type('Double', (TLType,), {})
-String = type('String', (TLType,), {})
+Int = type('Int', (TLType,), dict(constructors={}))
+Long = type('Long', (TLType,), dict(constructors={}))
+Double = type('Double', (TLType,), dict(constructors={}))
+String = type('String', (TLType,), dict(constructors={}))
 
 
 class Vector(TLType):
+
+    constructors = {}
 
     __slots__ = ('t')
 
@@ -101,7 +100,7 @@ class Vector(TLType):
 
 
 _P_Q_inner_dataBase = namedtuple('P_Q_inner_data', ['pq', 'p', 'q', 'nonce', 'server_nonce', 'new_nonce'])
-P_Q_inner_data = type('P_Q_inner_data', (TLType,), {})
+P_Q_inner_data = type('P_Q_inner_data', (TLType,), dict(constructors={}))
 
 
 """
@@ -199,8 +198,8 @@ Vector.add_constuctor(vector_c)
 int128 4*[ int ] = Int128
 int256 8*[ int ] = Int256
 """
-Int128 = type('Int128', (TLType,), {})
-Int256 = type('Int256', (TLType,), {})
+Int128 = type('Int128', (TLType,), dict(constructors={}))
+Int256 = type('Int256', (TLType,), dict(constructors={}))
 
 _Int128Base = namedtuple('Int128', 'value')
 _Int256Base = namedtuple('Int256', 'value')
@@ -303,7 +302,7 @@ type: ResPQ
 constructors:
     resPQ#05162463 nonce:int128 server_nonce:int128 pq:string server_public_key_fingerprints:Vector long = ResPQ
 """
-ResPQ = type('ResPQ', (TLType,), {})
+ResPQ = type('ResPQ', (TLType,), dict(constructors={}))
 
 resPQ_c = create_constructor(
     name='resPQ', number=0x05162463,
@@ -317,7 +316,7 @@ constructors:
     p_q_inner_data#83c95aec pq:string p:string q:string nonce:int128 server_nonce:int128 new_nonce:int256 = P_Q_inner_data
     p_q_inner_data_temp#3c6a84d4 pq:string p:string q:string nonce:int128 server_nonce:int128 new_nonce:int256 expires_in:int = P_Q_inner_data;
 """
-P_Q_inner_data = type('P_Q_inner_data', (TLType,), dict())
+P_Q_inner_data = type('P_Q_inner_data', (TLType,), dict(constructors={}))
 
 p_q_inner_data_c = create_constructor(
     name='p_q_inner_data', number=0x83c95aec,
@@ -336,7 +335,7 @@ server_DH_params_fail#79cb045d nonce:int128 server_nonce:int128 new_nonce_hash:i
 server_DH_params_ok#d0e8075c nonce:int128 server_nonce:int128 encrypted_answer:bytes = Server_DH_Params;
 """
 
-Server_DH_Params = type('Server_DH_Params', (TLType,), {})
+Server_DH_Params = type('Server_DH_Params', (TLType,), dict(constructors={}))
 
 server_DH_params_fail_c = create_constructor(
     name='server_DH_params_fail', number=0x79cb045d,
