@@ -118,7 +118,12 @@ class Datacenter:
         return res_pq
 
     def _req_inner_PQ_data(self, resPQ):
+        test_pq = 2081241535702769813
+
+        #resPQ = resPQ._replace(pq=tl.string_c.from_int(test_pq, byteorder='big'))
+
         pq = int.from_bytes(resPQ.pq.value, 'big')
+        print(pq, ...)
         p, q = prime.primefactors(pq)
         if p > q:
             p, q = q, p
@@ -126,61 +131,57 @@ class Datacenter:
         assert p * q == pq
         assert p < q
 
-        p_bytes = p.to_bytes(16, 'big')
-        q_bytes = q.to_bytes(16, 'big')
+        p_string = tl.string_c.from_int(p, byteorder='big')
+        q_string = tl.string_c.from_int(q, byteorder='big')
 
-        p_string = tl.string_c(p_bytes)
-        q_string = tl.string_c(q_bytes)
-
-        print(len(q_bytes), ...)
-        print(len(p_bytes), ...)
-
-        print(len(p_string.value), ...)
-        print(len(q_string.value), ...)
-
-        print(to_hex(q_bytes, 4), ...)
-        print(to_hex(q_string.value, 4), ...)
-
-        # TODO: user key passed from external source (e.g. config)
         key = RSA.importKey(self.rsa_key.strip())
-        # key = tl.string.from_bytes(RSA.importKey(self.rsa_key))
 
         new_nonce = tl.int256_c(self.random.getrandbits(256))
 
-        p_q_inner_data = tl.p_q_inner_data_c(resPQ.pq, p_string, q_string, resPQ.nonce, resPQ.server_nonce, new_nonce)
-        print('p_q_inner_data:', p_q_inner_data.hex_components())
+        p_q_inner_data = tl.p_q_inner_data_c(pq=resPQ.pq, p=p_string, q=q_string, nonce=resPQ.nonce, server_nonce=resPQ.server_nonce, new_nonce=new_nonce)
 
         assert p_q_inner_data.nonce.value == resPQ.nonce.value
 
-        data = p_q_inner_data.to_bytes()
+        data = p_q_inner_data.to_boxed_bytes()
+
+        print("Factorization %d = %d * %d" % (pq, p, q))
+        print('PQ:', to_hex(resPQ.pq.value, 4))
+        print('p:', to_hex(p_string.value, 4))
+        print('q:', to_hex(q_string.value, 4))
+        print('pq_io:', to_hex(resPQ.pq.to_bytes() + p_string.to_bytes() + q_string.to_bytes(), 4))
+
+        print('nonce:', to_hex(resPQ.nonce.to_bytes(), 4))
+        print('server_nonce:', to_hex(resPQ.server_nonce.to_bytes(), 4))
+        print('new_nonce:', to_hex(new_nonce.to_bytes(), 4))
+
+        #print('p_q_inner_data_new: pq:{} p:{} q:{} nonce:{} server_nonce:{} new_nonce:{}'.format(pq, p, q, resPQ.nonce, resPQ.server_nonce, new_nonce))
+        print('p_q_inner_data_new:', to_hex(data, 4))
+
         sha_digest = SHA.new(data).digest()
-
         public_key_fingerprint = resPQ.server_public_key_fingerprints.items[0]
-
-        print(public_key_fingerprint, ...)
 
         # get padding of random data to fill what is left after data and sha_digest
         random_bytes = os.urandom(255 - len(data) - len(sha_digest))
         to_encrypt = sha_digest + data + random_bytes  # encrypt cat of sha_digest, data, and padding
-        encrypted_data_bytes = key.encrypt(to_encrypt, 0)[0]  # rsa encrypt (key == RSA.key)
-        encrypted_data = tl.string_c(encrypted_data_bytes)
+        encrypted_data = tl.string_c.from_bytes(key.encrypt(to_encrypt, 0)[0])  # rsa encrypt (key == RSA.key)
 
-        print(encrypted_data.value, ...)
         # Presenting proof of work; Server authentication
-        req_DH_params = tl.req_DH_params(p=p_string, q=q_string,
-                                         nonce=resPQ.nonce,
+        req_DH_params = tl.req_DH_params(nonce=resPQ.nonce,
                                          server_nonce=resPQ.server_nonce,
+                                         p=p_string, q=q_string,
                                          public_key_fingerprint=public_key_fingerprint,
                                          encrypted_data=encrypted_data)
 
-        req_DH_params2 = rpc.req_DH_params(p=p_bytes, q=q_bytes,
-                                          nonce=resPQ.nonce.value.to_bytes(16, 'little'),
-                                          server_nonce=resPQ.server_nonce.value.to_bytes(16, 'little'),
-                                          public_key_fingerprint=public_key_fingerprint.value,
-                                          encrypted_data=encrypted_data_bytes)
+        req_DH_params2 = rpc.req_DH_params(nonce=resPQ.nonce.to_bytes(),
+                                           server_nonce=resPQ.server_nonce.to_bytes(),
+                                           p=p_string.value, q=q_string.value,
+                                           public_key_fingerprint=public_key_fingerprint.value,
+                                           encrypted_data=encrypted_data.value)
 
-        print('req_DH_params:', to_hex(req_DH_params2.get_bytes(), 4))
-        print('req_DH_params:', to_hex(req_DH_params.to_bytes(), 4))
+        #print(to_hex(req_DH_params.to_bytes(), 4))
+        #print(to_hex(req_DH_params2.get_bytes(), 4))
+
+        assert req_DH_params.to_bytes() == req_DH_params2.get_bytes()
 
         self.send_message(req_DH_params.to_bytes())
         return tl.Server_DH_Params.from_stream(self.recv_message())
@@ -190,7 +191,6 @@ class Datacenter:
 
         # resPQ#05162463 nonce:int128 server_nonce:int128 pq:bytes server_public_key_fingerprints:Vector<long> = ResPQ;
         resPQ = self._req_pq()
-        print('resPQ:', resPQ.hex_components())
 
         self._req_inner_PQ_data(resPQ)
 
@@ -327,24 +327,27 @@ class Datacenter:
         Reading socket and receiving message from server. Check the CRC32.
         """
         if debug:
-            packet = self.sock.recv(1024)  # reads how many bytes to read
+            packet = self.socket.read(1024)  # reads how many bytes to read
             hexdump(packet)
 
-        packet_length_data = self.socket.read(4)  # reads how many bytes to read
+        packet_bytes = self.socket.read(1024)
+        packet_io = BytesIO(packet_bytes)
 
-        if len(packet_length_data) < 4:
-            raise Exception("Nothing in the socket!")
-        packet_length = struct.unpack("<I", packet_length_data)[0]
-        packet = self.socket.read(packet_length - 4)  # read the rest of bytes from socket
+        packet_length_data = packet_io.read(4)  # reads how many bytes to read
+        packet_length = int.from_bytes(packet_length_data, 'little')
+
+        print('packet:', to_hex(packet_length_data), packet_length, len(packet_bytes), to_hex(packet_bytes, 4))
+
+        packet = packet_io.read(packet_length)
+
+        # packet = self.socket.read(packet_length)
+        # packet_io = BytesIO(packet)
 
         # check the CRC32
-        if not crc32(packet_length_data + packet[0:-4]) == struct.unpack('<I', packet[-4:])[0]:
+        if crc32(packet_length_data + packet[0:-4]) != struct.unpack('<I', packet[-4:])[0]:
             raise Exception("CRC32 was not correct!")
-        # x = struct.unpack("<I", packet[:4])
-        auth_key_id = packet[4:12]
-        print(to_hex(packet, 4))
-        #print(to_hex(self.auth_key_id, 4))
 
+        auth_key_id = packet[4:12]
 
         if auth_key_id == b'\x00\x00\x00\x00\x00\x00\x00\x00':
             # No encryption - Plain text

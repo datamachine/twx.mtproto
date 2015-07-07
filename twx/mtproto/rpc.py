@@ -2,6 +2,7 @@ from abc import ABCMeta
 import struct
 from io import BytesIO
 from hexdump import hexdump
+from . util import to_hex
 
 
 def vis(bs):
@@ -187,19 +188,12 @@ class req_DH_params:
     def get_bytes(self):
         """req_DH_params#d712e4be nonce:int128 server_nonce:int128 p:bytes q:bytes public_key_fingerprint:long encrypted_data:bytes = Server_DH_Params"""
 
-
         pq_io = BytesIO()
         serialize_string(pq_io, self.p)
         serialize_string(pq_io, self.q)
 
-        ret = struct.pack("<I16s16s16sq", req_DH_params.constructor, self.nonce, self.server_nonce,
+        ret = struct.pack("<I16s16s16sQ", req_DH_params.constructor, self.nonce, self.server_nonce,
                           pq_io.getvalue(), self.public_key_fingerprint)
-        # ret = struct.pack("<I16s16s16sq", req_DH_params.constructor, self.nonce, self.server_nonce,
-        #                   pq_io.getvalue(), self.public_key_fingerprint)
-        # ret = struct.pack("<I16s16s16sq", req_DH_params.constructor, self.nonce, self.server_nonce,
-        #                   pq_io.getvalue(), self.public_key_fingerprint)
-        # ret = struct.pack("<I16s16s16sq", req_DH_params.constructor, self.nonce, self.server_nonce,
-        #                   pq_io.getvalue(), self.public_key_fingerprint)
 
         bytes_io = BytesIO()
         bytes_io.write(ret)

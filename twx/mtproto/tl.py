@@ -104,6 +104,12 @@ P_Q_inner_data = type('P_Q_inner_data', (TLType,), dict(constructors={}))
 
 class TLCombinator(TLObject):
 
+    def hex_components(self, boxed=False):
+        result = ['{}:{}'.format(self.name, to_hex(self.number, 4))] if boxed else ['{}: '.format(self.name)]
+        for arg in self:
+            result += ['{}:{}'.format(arg.name, to_hex(b''.join(arg._bytes()), 4))]
+        return " ".join(result)
+
     @abstractstaticmethod
     def from_stream(stream, boxed):
         raise NotImplementedError()
@@ -214,6 +220,7 @@ class long_c(_LongBase, TLConstructor):
     __slots__ = ()
 
     number = crc32('long ? = Long'.encode()).to_bytes(4, 'little')
+    name = 'long_c'
 
     def _bytes(self):
         return [self.value.to_bytes(8, 'little')]
@@ -232,6 +239,7 @@ Long.add_constuctor(long_c)
 class vector_c(_VectorBase, TLConstructor):
 
     number = int(0x1cb5c415).to_bytes(4, 'little')
+    name = 'vector'
 
     def __new__(cls, item_type, num=None, items=None):
         return super().__new__(cls, item_type, num, items)
@@ -262,6 +270,7 @@ class int128_c(_Int128Base, TLConstructor):
 
     number = crc32('int 4*[ int ] = Int128'.encode()).to_bytes(4, 'little')
     param_types = _Int128Base(int)
+    name = 'int128'
 
     def _bytes(self):
         return [self.value.to_bytes(16, 'little')]
@@ -296,35 +305,49 @@ Int256.add_constuctor(int256_c)
 
 class string_c(_StringBase, TLConstructor):
 
-    def _bytes(self):
-        str_bytes = bytes(self.value)
+    name = 'string'
+    param_types = _StringBase(bytes)
 
-        length = len(str_bytes)
-        if length <= 253:
-            length = length.to_bytes(1, byteorder='little')
+    def pfx(self):
+        length = len(self.value)
+        if length < 254:
+            return bytes([length])
         else:
-            length = b''.join([int(254).to_bytes(1, byteorder='little'), length.to_bytes(3, byteorder='little')])
+            return b''.join([bytes([254]), length.to_bytes(3, 'little')])
 
-        padding = bytes(4 - (len(length) + len(str_bytes)) % 4)
+    def pfx_length(self):
+        return len(self.pfx())
 
-        return [length + str_bytes + padding]
+    def value_length(self):
+        return len(self.value)
+
+    def padding(self):
+        return bytes(self.padding_length())
+
+    def padding_length(self):
+        return (4 - ((self.pfx_length() + self.value_length()) % 4)) % 4
+
+    def total_length(self):
+        print(self.pfx_length(), self.value_length(), self.padding_length(), ...)
+        return self.pfx_length() + self.value_length() + self.padding_length()
+
+    def _bytes(self):
+        return [self.pfx() + self.value + self.padding()]
 
     @classmethod
     def from_stream(cls, stream):
-        count = 0
-
-        str_len = int.from_bytes(stream.read(1), 'little')
-        count += 1
+        str_len = stream.read(1)[0]
+        count = 1
 
         if str_len > 253:
-            str_len = int.from_bytes(stream.read(3), 'little')
+            str_len = int.from_bytes(stream.read(3), 'little', signed=True)
             count += 3
 
         str_bytes = stream.read(str_len)
         count += str_len
 
         # get rid of the padded bytes
-        stream.read(4 - count % 4)
+        stream.read((4 - (count % 4)) % 4)
 
         return string_c.__new__(string_c, str_bytes)
 
@@ -332,23 +355,19 @@ class string_c(_StringBase, TLConstructor):
     def from_bytes(obj):
         assert isinstance(obj, bytes)
 
-        len_pfx = len(obj)
-        if len_pfx < 254:
-            len_pfx = len_pfx.to_bytes(1, 'little')
-        else:
-            len_pfx = int(254).to_bytes(1, 'little') + len_pfx.to_bytes(3, 'little')
-
-        padding = bytes(4 - (len(len_pfx) + len(obj)) % 4)
-
-        value = b''.join([len_pfx, obj, padding])
-        assert len(value) % 4 == 0
-
-        return string_c.__new__(string_c, value)
+        return string_c.__new__(string_c, obj)
 
     @staticmethod
-    def from_int(obj, length, byteorder, signed=False):
+    def from_int(obj, length=None, byteorder='little'):
         assert isinstance(obj, int)
-        return string_c.from_bytes(obj.to_bytes(length, byteorder, signed=signed))
+
+        if length is None:
+            length = obj.bit_length() // 8 + 1
+
+        return string_c.from_bytes(obj.to_bytes(length, byteorder))
+
+    def to_int(self, byteorder='little'):
+        return int.from_bytes(self.value, byteorder)
 
 bytes_c = string_c
 
@@ -695,6 +714,7 @@ class req_pq(namedtuple('req_pq', ['nonce']), TLFunction):
     """req_pq#60469778 nonce:int128 = ResPQ"""
 
     number = int(0x60469778).to_bytes(4, byteorder='little')
+    name = 'req_DH_params'
     ...
 
 
@@ -705,6 +725,7 @@ class req_DH_params(namedtuple('req_DH_params',
     req_DH_params#d712e4be nonce:int128 server_nonce:int128 p:string q:string public_key_fingerprint:long encrypted_data:string = Server_DH_Params
     """
     number = int(0xd712e4be).to_bytes(4, byteorder='little')
+    name = 'req_DH_params'
     ...
 
 """
