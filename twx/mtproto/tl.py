@@ -36,16 +36,13 @@ class TLObject(metaclass=ABCMeta):
         raise NotImplementedError()
 
 
-_IntBase = namedtuple('int', 'value')
-_LongBase = namedtuple('long', 'value')
-_DoubleBase = namedtuple('double', 'value')
-_StringBase = namedtuple('String', 'value')
 
 
 _VectorBase = namedtuple('Vector', ('t', 'num', 'items'))
 
 
 class TLType:
+    constructors = {}
 
     def __new__(cls, *args, **kwargs):
         if issubclass(cls, Vector):
@@ -66,13 +63,11 @@ class TLType:
 
     @classmethod
     def add_constuctor(cls, constructor_cls):
+        if TLType.constructors.get(constructor_cls.number) is not None:
+            raise ValueError('duplicate constructor with number: {}'.format(constructor_cls.number))
         cls.constructors[constructor_cls.number] = constructor_cls
 
 
-Int = type('Int', (TLType,), dict(constructors={}))
-Long = type('Long', (TLType,), dict(constructors={}))
-Double = type('Double', (TLType,), dict(constructors={}))
-String = type('String', (TLType,), dict(constructors={}))
 
 
 class Vector(TLType):
@@ -130,6 +125,7 @@ class TLConstructor(TLCombinator):
 
     def _bytes(self, boxed=False):
         result = [self.number] if boxed else []
+        print(self, ...)
         for arg in self:
             result += arg._bytes()
         return result
@@ -152,6 +148,39 @@ def create_constructor(name, number, params, param_types, result_type):
     new_type = type(name, class_bases, class_body)
     result_type.add_constuctor(new_type)
     return new_type
+
+_IntBase = namedtuple('int', 'value')
+_LongBase = namedtuple('long', 'value')
+_DoubleBase = namedtuple('double', 'value')
+_StringBase = namedtuple('String', 'value')
+
+Int = type('Int', (TLType,), dict(constructors={}))
+Long = type('Long', (TLType,), dict(constructors={}))
+Double = type('Double', (TLType,), dict(constructors={}))
+String = type('String', (TLType,), dict(constructors={}))
+
+class int_c(_IntBase, TLConstructor):
+
+    """
+    int ? = Int
+    """
+
+    __slots__ = ()
+
+    number = crc32('int ? = Int'.encode()).to_bytes(4, 'little')
+
+    def _bytes(self):
+        return [self.value.to_bytes(4, 'little')]
+
+    @staticmethod
+    def from_int(_int):
+        result = int_c.__new__(int_c, _int)
+        return result
+
+    @classmethod
+    def from_stream(cls, stream):
+        return int_c.from_int(int.from_bytes(stream.read(4), byteorder='little'))
+Int.add_constuctor(int_c)
 
 class long_c(_LongBase, TLConstructor):
 
@@ -180,6 +209,9 @@ Long.add_constuctor(long_c)
 class vector_c(_VectorBase, TLConstructor):
 
     number = int(0x1cb5c415).to_bytes(4, 'little')
+
+    def __new__(cls, item_type, num=None, items=None):
+        return super().__new__(cls, item_type, num, items)
 
     def _bytes(self):
         return [item.to_bytes() for item in self.items]
@@ -297,57 +329,329 @@ class string_c(_StringBase, TLConstructor):
 
 bytes_c = string_c
 
-"""
-type: ResPQ
-constructors:
-    resPQ#05162463 nonce:int128 server_nonce:int128 pq:string server_public_key_fingerprints:Vector long = ResPQ
-"""
-ResPQ = type('ResPQ', (TLType,), dict(constructors={}))
+
+
+class ResPQ(TLType):
+    constructors = {}
+
 
 resPQ_c = create_constructor(
-    name='resPQ', number=0x05162463,
+    name='resPQ_c', number=0x05162463,
     params=['nonce', 'server_nonce', 'pq', 'server_public_key_fingerprints'],
-    param_types=[int128_c, int128_c, string_c, Vector(long_c)],
+    param_types=[int128_c, int128_c, bytes_c, Vector(long_c)],
     result_type=ResPQ)
 
-"""
-type: P_Q_inner_data
-constructors:
-    p_q_inner_data#83c95aec pq:string p:string q:string nonce:int128 server_nonce:int128 new_nonce:int256 = P_Q_inner_data
-    p_q_inner_data_temp#3c6a84d4 pq:string p:string q:string nonce:int128 server_nonce:int128 new_nonce:int256 expires_in:int = P_Q_inner_data;
-"""
-P_Q_inner_data = type('P_Q_inner_data', (TLType,), dict(constructors={}))
+
+class P_Q_inner_data(TLType):
+    constructors = {}
+
 
 p_q_inner_data_c = create_constructor(
-    name='p_q_inner_data', number=0x83c95aec,
+    name='p_q_inner_data_c', number=0x83c95aec,
     params=['pq', 'p', 'q', 'nonce', 'server_nonce', 'new_nonce'],
-    param_types=[string_c, string_c, string_c, int128_c, int128_c, int256_c],
+    param_types=[bytes_c, bytes_c, bytes_c, int128_c, int128_c, int256_c],
     result_type=P_Q_inner_data)
 
-p_q_inner_data_temp = create_constructor(
-    name='p_q_inner_data_temp', number=0x3c6a84d4,
-    params=['pq', 'p', 'q', 'nonce', 'server_nonce', 'new_nonce', 'expires_in'],
-    param_types=[string_c, string_c, string_c, int128_c, int128_c, int256_c, int],
-    result_type=P_Q_inner_data)
 
-"""
-server_DH_params_fail#79cb045d nonce:int128 server_nonce:int128 new_nonce_hash:int128 = Server_DH_Params;
-server_DH_params_ok#d0e8075c nonce:int128 server_nonce:int128 encrypted_answer:bytes = Server_DH_Params;
-"""
+class Server_DH_Params(TLType):
+    constructors = {}
 
-Server_DH_Params = type('Server_DH_Params', (TLType,), dict(constructors={}))
 
 server_DH_params_fail_c = create_constructor(
-    name='server_DH_params_fail', number=0x79cb045d,
+    name='server_DH_params_fail_c', number=0x79cb045d,
     params=['nonce', 'server_nonce', 'new_nonce_hash'],
     param_types=[int128_c, int128_c, int128_c],
     result_type=Server_DH_Params)
 
+
 server_DH_params_ok_c = create_constructor(
-    name='server_DH_params_ok', number=0xd0e8075c,
+    name='server_DH_params_ok_c', number=0xd0e8075c,
     params=['nonce', 'server_nonce', 'encrypted_answer'],
     param_types=[int128_c, int128_c, bytes_c],
     result_type=Server_DH_Params)
+
+
+class Server_DH_inner_data(TLType):
+    constructors = {}
+
+
+server_DH_inner_data_c = create_constructor(
+    name='server_DH_inner_data_c', number=0xb5890dba,
+    params=['nonce', 'server_nonce', 'g', 'dh_prime', 'g_a', 'server_time'],
+    param_types=[int128_c, int128_c, int_c, bytes_c, bytes_c, int_c],
+    result_type=Server_DH_inner_data)
+
+
+class Client_DH_Inner_Data(TLType):
+    constructors = {}
+
+
+client_DH_inner_data_c = create_constructor(
+    name='client_DH_inner_data_c', number=0x6643b654,
+    params=['nonce', 'server_nonce', 'retry_id', 'g_b'],
+    param_types=[int128_c, int128_c, long_c, bytes_c],
+    result_type=Client_DH_Inner_Data)
+
+
+class Set_client_DH_params_answer(TLType):
+    constructors = {}
+
+
+dh_gen_ok_c = create_constructor(
+    name='dh_gen_ok_c', number=0x3bcbf734,
+    params=['nonce', 'server_nonce', 'new_nonce_hash1'],
+    param_types=[int128_c, int128_c, int128_c],
+    result_type=Set_client_DH_params_answer)
+
+
+dh_gen_retry_c = create_constructor(
+    name='dh_gen_retry_c', number=0x46dc1fb9,
+    params=['nonce', 'server_nonce', 'new_nonce_hash2'],
+    param_types=[int128_c, int128_c, int128_c],
+    result_type=Set_client_DH_params_answer)
+
+
+dh_gen_fail_c = create_constructor(
+    name='dh_gen_fail_c', number=0xa69dae02,
+    params=['nonce', 'server_nonce', 'new_nonce_hash3'],
+    param_types=[int128_c, int128_c, int128_c],
+    result_type=Set_client_DH_params_answer)
+
+
+class RpcResult(TLType):
+    constructors = {}
+
+
+rpc_result_c = create_constructor(
+    name='rpc_result_c', number=0xf35c6d01,
+    params=['req_msg_id', 'result'],
+    param_types=[long_c, TLType],
+    result_type=RpcResult)
+
+
+class RpcError(TLType):
+    constructors = {}
+
+
+rpc_error_c = create_constructor(
+    name='rpc_error_c', number=0x2144ca19,
+    params=['error_code', 'error_message'],
+    param_types=[int_c, string_c],
+    result_type=RpcError)
+
+
+class RpcDropAnswer(TLType):
+    constructors = {}
+
+
+rpc_answer_unknown_c = create_constructor(
+    name='rpc_answer_unknown_c', number=0x5e2ad36e,
+    params=[],
+    param_types=[],
+    result_type=RpcDropAnswer)
+
+
+rpc_answer_dropped_running_c = create_constructor(
+    name='rpc_answer_dropped_running_c', number=0xcd78e586,
+    params=[],
+    param_types=[],
+    result_type=RpcDropAnswer)
+
+
+rpc_answer_dropped_c = create_constructor(
+    name='rpc_answer_dropped_c', number=0xa43ad8b7,
+    params=['msg_id', 'seq_no', 'bytes'],
+    param_types=[long_c, int_c, int_c],
+    result_type=RpcDropAnswer)
+
+
+class FutureSalt(TLType):
+    constructors = {}
+
+
+future_salt_c = create_constructor(
+    name='future_salt_c', number=0x0949d9dc,
+    params=['valid_since', 'valid_until', 'salt'],
+    param_types=[int_c, int_c, long_c],
+    result_type=FutureSalt)
+
+
+class FutureSalts(TLType):
+    constructors = {}
+
+
+future_salts_c = create_constructor(
+    name='future_salts_c', number=0xae500895,
+    params=['req_msg_id', 'now', 'salts'],
+    param_types=[long_c, int_c, vector_c(future_salt_c)],
+    result_type=FutureSalts)
+
+
+class Pong(TLType):
+    constructors = {}
+
+
+pong_c = create_constructor(
+    name='pong_c', number=0x347773c5,
+    params=['msg_id', 'ping_id'],
+    param_types=[long_c, long_c],
+    result_type=Pong)
+
+
+class DestroySessionRes(TLType):
+    constructors = {}
+
+
+destroy_session_ok_c = create_constructor(
+    name='destroy_session_ok_c', number=0xe22045fc,
+    params=['session_id'],
+    param_types=[long_c],
+    result_type=DestroySessionRes)
+
+
+destroy_session_none_c = create_constructor(
+    name='destroy_session_none_c', number=0x62d350c9,
+    params=['session_id'],
+    param_types=[long_c],
+    result_type=DestroySessionRes)
+
+
+class NewSession(TLType):
+    constructors = {}
+
+
+new_session_created_c = create_constructor(
+    name='new_session_created_c', number=0x9ec20908,
+    params=['first_msg_id', 'unique_id', 'server_salt'],
+    param_types=[long_c, long_c, long_c],
+    result_type=NewSession)
+
+
+class Message(TLType):
+    constructors = {}
+
+
+message_c = create_constructor(
+    name='message_c', number=crc32('message msg_id:long seqno:int bytes:int body:Object = Message'.encode()),
+    params=['msg_id', 'seqno', 'bytes', 'body'],
+    param_types=[long_c, int_c, int_c, TLType],
+    result_type=Message)
+
+
+class MessageContainer(TLType):
+    constructors = {}
+
+
+msg_container_c = create_constructor(
+    name='msg_container_c', number=0x73f1f8dc,
+    params=['messages'],
+    param_types=[vector_c(message_c)],
+    result_type=MessageContainer)
+
+
+class MessageCopy(TLType):
+    constructors = {}
+
+
+msg_copy_c = create_constructor(
+    name='msg_copy_c', number=0xe06046b2,
+    params=['orig_message'],
+    param_types=[Message],
+    result_type=MessageCopy)
+
+
+gzip_packed_c = create_constructor(
+    name='gzip_packed_c', number=0x3072cfa1,
+    params=['packed_data'],
+    param_types=[bytes_c],
+    result_type=TLType)
+
+
+class MsgsAck(TLType):
+    constructors = {}
+
+
+msgs_ack_c = create_constructor(
+    name='msgs_ack_c', number=0x62d6b459,
+    params=['msg_ids'],
+    param_types=[Vector(long_c)],
+    result_type=MsgsAck)
+
+
+class BadMsgNotification(TLType):
+    constructors = {}
+
+
+bad_msg_notification_c = create_constructor(
+    name='bad_msg_notification_c', number=0xa7eff811,
+    params=['bad_msg_id', 'bad_msg_seqno', 'error_code'],
+    param_types=[long_c, int_c, int_c],
+    result_type=BadMsgNotification)
+
+
+bad_server_salt_c = create_constructor(
+    name='bad_server_salt_c', number=0xedab447b,
+    params=['bad_msg_id', 'bad_msg_seqno', 'error_code', 'new_server_salt'],
+    param_types=[long_c, int_c, int_c, long_c],
+    result_type=BadMsgNotification)
+
+
+class MsgResendReq(TLType):
+    constructors = {}
+
+
+msg_resend_req_c = create_constructor(
+    name='msg_resend_req_c', number=0x7d861a08,
+    params=['msg_ids'],
+    param_types=[Vector(long_c)],
+    result_type=MsgResendReq)
+
+
+class MsgsStateReq(TLType):
+    constructors = {}
+
+
+msgs_state_req_c = create_constructor(
+    name='msgs_state_req_c', number=0xda69fb52,
+    params=['msg_ids'],
+    param_types=[Vector(long_c)],
+    result_type=MsgsStateReq)
+
+
+class MsgsStateInfo(TLType):
+    constructors = {}
+
+
+msgs_state_info_c = create_constructor(
+    name='msgs_state_info_c', number=0x04deb57d,
+    params=['req_msg_id', 'info'],
+    param_types=[long_c, bytes_c],
+    result_type=MsgsStateInfo)
+
+
+class MsgsAllInfo(TLType):
+    constructors = {}
+
+
+msgs_all_info_c = create_constructor(
+    name='msgs_all_info_c', number=0x8cc0d131,
+    params=['msg_ids', 'info'],
+    param_types=[Vector(long_c), bytes_c],
+    result_type=MsgsAllInfo)
+
+
+class MsgDetailedInfo(TLType):
+    constructors = {}
+
+
+msg_detailed_info_c = create_constructor(
+    name='msg_detailed_info_c', number=0x276d3ec6,
+    params=['msg_id', 'answer_msg_id', 'bytes', 'status'],
+    param_types=[long_c, long_c, int_c, int_c],
+    result_type=MsgDetailedInfo)
+
+
+
 
 """
 ---functions---
@@ -378,3 +682,19 @@ class req_DH_params(namedtuple('req_DH_params',
     req_DH_params#d712e4be nonce:int128 server_nonce:int128 p:string q:string public_key_fingerprint:long encrypted_data:string = Server_DH_Params
     """
     ...
+
+"""
+req_pq#60469778 nonce:int128 = ResPQ;
+
+req_DH_params#d712e4be nonce:int128 server_nonce:int128 p:bytes q:bytes public_key_fingerprint:long encrypted_data:bytes = Server_DH_Params;
+
+set_client_DH_params#f5045f1f nonce:int128 server_nonce:int128 encrypted_data:bytes = Set_client_DH_params_answer;
+
+rpc_drop_answer#58e4a740 req_msg_id:long = RpcDropAnswer;
+get_future_salts#b921bd04 num:int = FutureSalts;
+ping#7abe77ec ping_id:long = Pong;
+ping_delay_disconnect#f3427b8c ping_id:long disconnect_delay:int = Pong;
+destroy_session#e7512126 session_id:long = DestroySessionRes;
+
+http_wait#9299359f max_delay:int wait_after:int max_wait:int = HttpWait;
+"""
