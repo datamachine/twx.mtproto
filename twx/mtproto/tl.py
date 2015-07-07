@@ -52,7 +52,6 @@ class TLType:
 
     @classmethod
     def from_stream(cls, stream):
-        print(cls, ...)
         """Boxed type combinator loading"""
         con_num = stream.read(4)
         con = cls.constructors.get(con_num)
@@ -120,25 +119,47 @@ class TLCombinator(TLObject):
     def _bytes(self):
         raise NotImplementedError()
 
+    @classmethod
+    def verify_arg_types(cls, *args, **kwargs):
+        for arg, param_type in zip(args, cls.param_types):
+            if isinstance(param_type, TLType):
+                if arg.number not in param_type.constructors:
+                    raise TypeError('{}:{} is not a constructor for {}, must be one of {}'.format(arg, arg.number, param_type, param_type.constructors.keys()))
+
+            elif not isinstance(arg, param_type):
+                raise TypeError('{}:{} should be {} in {}'.format(arg, type(arg), param_type, cls))
+
+        for key, arg in kwargs.items():
+            param_type = cls.param_types._asdict()[key]
+            if not isinstance(arg, param_type) and not issubclass(arg, param_type):
+                raise TypeError('{}:{} should be {} in {}'.format(arg, type(arg), param_type, self))
+
 
 class TLConstructor(TLCombinator):
 
     def _bytes(self, boxed=False):
         result = [self.number] if boxed else []
-        print(self, ...)
         for arg in self:
             result += arg._bytes()
         return result
 
     @classmethod
     def from_stream(cls, stream):
-        args = [p.from_stream(stream) for p in cls.param_types]
+        args = []
+        for p in cls.param_types:
+            arg = p.from_stream(stream)
+            args.append(arg)
         return cls.__new__(cls, *args)
 
 def create_constructor(name, number, params, param_types, result_type):
+    def con__new__(cls, *args, **kwargs):
+        cls.verify_arg_types(*args, **kwargs)
+        return super(cls._cls, cls).__new__(cls, *args, **kwargs)
+
     params = namedtuple(name, params)
     class_bases = (params, TLConstructor)
     class_body = dict(
+        __new__=con__new__,
         name=name,
         number=number.to_bytes(4, 'little'),
         params=params,
@@ -146,6 +167,8 @@ def create_constructor(name, number, params, param_types, result_type):
         result_type=result_type
         )
     new_type = type(name, class_bases, class_body)
+    setattr(new_type, '_cls', new_type)
+
     result_type.add_constuctor(new_type)
     return new_type
 
@@ -218,7 +241,6 @@ class vector_c(_VectorBase, TLConstructor):
 
     @staticmethod
     def from_stream(stream, t):
-        print('building', ...)
         num = int.from_bytes(stream.read(4), 'little')
         items = []
         for i in iter(range(num)):
@@ -239,6 +261,7 @@ _Int256Base = namedtuple('Int256', 'value')
 class int128_c(_Int128Base, TLConstructor):
 
     number = crc32('int 4*[ int ] = Int128'.encode()).to_bytes(4, 'little')
+    param_types = _Int128Base(int)
 
     def _bytes(self):
         return [self.value.to_bytes(16, 'little')]
@@ -255,6 +278,7 @@ class int128_c(_Int128Base, TLConstructor):
 class int256_c(_Int128Base, TLConstructor):
 
     number = crc32('int 4*[ int ] = Int128'.encode()).to_bytes(4, 'little')
+    param_types = _Int128Base(int)
 
     def _bytes(self):
         return [self.value.to_bytes(32, 'little')]

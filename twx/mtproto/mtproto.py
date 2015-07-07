@@ -119,7 +119,6 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
         nonce = tl.int128_c(self.random.getrandbits(128))
         request = tl.req_pq(nonce)
         self.send_message(request.to_bytes())
-        print(tl.ResPQ, ...)
         res_pq = tl.ResPQ.from_stream(self.recv_message())
 
         assert nonce.value == res_pq.nonce.value
