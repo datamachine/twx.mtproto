@@ -26,10 +26,10 @@ log = logging.getLogger(__name__)
 
 class MTProto:
 
-    def __init__(self, api_secret, api_id):
+    def __init__(self, api_secret, api_id, rsa_key):
         self.api_secret = api_secret
         self.api_id = api_id
-        self.dc = Datacenter(0, Datacenter.DCs_test[1], 443)
+        self.dc = Datacenter(0, Datacenter.DCs_test[1], 443, rsa_key)
 
 
 class Datacenter:
@@ -63,7 +63,7 @@ class Datacenter:
         "2001:b28:f23d:f003::e",
     ]
 
-    def __init__(self, dc_id, ipaddr, port):
+    def __init__(self, dc_id, ipaddr, port, rsa_key):
         self.random = SystemRandom()
 
         self.ipaddr = ipaddr
@@ -89,15 +89,7 @@ class Datacenter:
         self.MAX_RETRY = 5
         self.AUTH_MAX_RETRY = 5
 
-        # TODO: Pass this in
-        self.rsa_key = """-----BEGIN RSA PUBLIC KEY-----
-MIIBCgKCAQEAwVACPi9w23mF3tBkdZz+zwrzKOaaQdr01vAbU4E1pvkfj4sqDsm6
-lyDONS789sVoD/xCS9Y0hkkC3gtL1tSfTlgCMOOul9lcixlEKzwKENj1Yz/s7daS
-an9tqw3bfUV/nqgbhGX81v/+7RFAEd+RwFnK7a+XYl9sluzHRyVVaTTveB2GazTw
-Efzk2DWgkBluml8OREmvfraX3bkHZJTKX4EQSjBbbdJ2ZXIsRrYOXfaA+xayEGB+
-8hdlLmAjbCVfaigxX0CDqWeR1yFL9kwd9P0NsZRPsmoqVwMbMu7mStFai6aIhc3n
-Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
------END RSA PUBLIC KEY-----"""
+        self.rsa_key = rsa_key
 
         # Handshake
         self.create_auth_key()
@@ -134,48 +126,75 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
         assert p * q == pq
         assert p < q
 
-        p = tl.string_c.from_int(p, 8, 'big')
-        q = tl.string_c.from_int(q, 8, 'big')
+        p_bytes = p.to_bytes(16, 'big')
+        q_bytes = q.to_bytes(16, 'big')
+
+        p_string = tl.string_c(p_bytes)
+        q_string = tl.string_c(q_bytes)
+
+        print(len(q_bytes), ...)
+        print(len(p_bytes), ...)
+
+        print(len(p_string.value), ...)
+        print(len(q_string.value), ...)
+
+        print(to_hex(q_bytes, 4), ...)
+        print(to_hex(q_string.value, 4), ...)
 
         # TODO: user key passed from external source (e.g. config)
-        #key = tl.string.from_bytes(RSA.importKey(self.rsa_key))
+        key = RSA.importKey(self.rsa_key.strip())
+        # key = tl.string.from_bytes(RSA.importKey(self.rsa_key))
 
         new_nonce = tl.int256_c(self.random.getrandbits(256))
 
-        return tl.p_q_inner_data_c(resPQ.pq, p, q, resPQ.nonce, resPQ.server_nonce, new_nonce)
+        p_q_inner_data = tl.p_q_inner_data_c(resPQ.pq, p_string, q_string, resPQ.nonce, resPQ.server_nonce, new_nonce)
+        print('p_q_inner_data:', p_q_inner_data.hex_components())
+
+        assert p_q_inner_data.nonce.value == resPQ.nonce.value
+
+        data = p_q_inner_data.to_bytes()
+        sha_digest = SHA.new(data).digest()
+
+        public_key_fingerprint = resPQ.server_public_key_fingerprints.items[0]
+
+        print(public_key_fingerprint, ...)
+
+        # get padding of random data to fill what is left after data and sha_digest
+        random_bytes = os.urandom(255 - len(data) - len(sha_digest))
+        to_encrypt = sha_digest + data + random_bytes  # encrypt cat of sha_digest, data, and padding
+        encrypted_data_bytes = key.encrypt(to_encrypt, 0)[0]  # rsa encrypt (key == RSA.key)
+        encrypted_data = tl.string_c(encrypted_data_bytes)
+
+        print(encrypted_data.value, ...)
+        # Presenting proof of work; Server authentication
+        req_DH_params = tl.req_DH_params(p=p_string, q=q_string,
+                                         nonce=resPQ.nonce,
+                                         server_nonce=resPQ.server_nonce,
+                                         public_key_fingerprint=public_key_fingerprint,
+                                         encrypted_data=encrypted_data)
+
+        req_DH_params2 = rpc.req_DH_params(p=p_bytes, q=q_bytes,
+                                          nonce=resPQ.nonce.value.to_bytes(16, 'little'),
+                                          server_nonce=resPQ.server_nonce.value.to_bytes(16, 'little'),
+                                          public_key_fingerprint=public_key_fingerprint.value,
+                                          encrypted_data=encrypted_data_bytes)
+
+        print('req_DH_params:', to_hex(req_DH_params2.get_bytes(), 4))
+        print('req_DH_params:', to_hex(req_DH_params.to_bytes(), 4))
+
+        self.send_message(req_DH_params.to_bytes())
+        return tl.Server_DH_Params.from_stream(self.recv_message())
 
 
     def create_auth_key(self):
 
         # resPQ#05162463 nonce:int128 server_nonce:int128 pq:bytes server_public_key_fingerprints:Vector<long> = ResPQ;
         resPQ = self._req_pq()
-        print(resPQ.hex_components())
+        print('resPQ:', resPQ.hex_components())
 
-        p_q_inner_data = self._req_inner_PQ_data(resPQ)
-
-        print(p_q_inner_data.hex_components())
+        self._req_inner_PQ_data(resPQ)
 
         assert False, "TODO: Working up to here"
-
-        data = p_q_inner_data.get_bytes()
-        assert p_q_inner_data.nonce == resPQ.nonce
-
-        sha_digest = SHA.new(data).digest()
-        # get padding of random data to fill what is left after data and sha_digest
-        random_bytes = os.urandom(255 - len(data) - len(sha_digest))
-        to_encrypt = sha_digest + data + random_bytes  # encrypt cat of sha_digest, data, and padding
-        encrypted_data = key.encrypt(to_encrypt, 0)[0]  # rsa encrypt (key == RSA.key)
-
-        # Presenting proof of work; Server authentication
-        req_DH_params = rpc.req_DH_params(p=p_bytes, q=q_bytes,
-                                          nonce=resPQ.nonce,
-                                          server_nonce=resPQ.server_nonce,
-                                          public_key_fingerprint=public_key_fingerprint,
-                                          encrypted_data=encrypted_data)
-        data = req_DH_params.get_bytes()
-
-        self.send_message(data)
-        data = self.recv_message(debug=False)
 
         # 5) Server responds in one of two ways:
         server_DH_params = rpc.server_DH_params(data)
@@ -323,6 +342,10 @@ Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
             raise Exception("CRC32 was not correct!")
         # x = struct.unpack("<I", packet[:4])
         auth_key_id = packet[4:12]
+        print(to_hex(packet, 4))
+        #print(to_hex(self.auth_key_id, 4))
+
+
         if auth_key_id == b'\x00\x00\x00\x00\x00\x00\x00\x00':
             # No encryption - Plain text
             (message_id, message_length) = struct.unpack("<QI", packet[12:24])
@@ -359,4 +382,4 @@ class MTProtoClient:
         self.test_dc = urlsplit(config.get('servers', 'test_dc'))
 
     def init_connection(self):
-        MTProto('FFFFFFFFF', 'EEEEEEEE')
+        MTProto('FFFFFFFFF', 'EEEEEEEE', self.public_keys)

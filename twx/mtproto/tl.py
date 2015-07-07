@@ -303,8 +303,7 @@ class string_c(_StringBase, TLConstructor):
         if length <= 253:
             length = length.to_bytes(1, byteorder='little')
         else:
-            length = b''.join(int(254).to_bytes(1, byteorder='little'),
-                              length.to_bytes(3, byteorder='little'))
+            length = b''.join([int(254).to_bytes(1, byteorder='little'), length.to_bytes(3, byteorder='little')])
 
         padding = bytes(4 - (len(length) + len(str_bytes)) % 4)
 
@@ -700,11 +699,12 @@ class req_pq(namedtuple('req_pq', ['nonce']), TLFunction):
 
 
 class req_DH_params(namedtuple('req_DH_params',
-    ['nonce', 'server_nonce', 'p', 'q', 'public_key_fingerprint', 'encrypted_data'])):
+    ['nonce', 'server_nonce', 'p', 'q', 'public_key_fingerprint', 'encrypted_data']), TLFunction):
 
     """
     req_DH_params#d712e4be nonce:int128 server_nonce:int128 p:string q:string public_key_fingerprint:long encrypted_data:string = Server_DH_Params
     """
+    number = int(0xd712e4be).to_bytes(4, byteorder='little')
     ...
 
 """
