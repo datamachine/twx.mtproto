@@ -103,7 +103,7 @@ class Datacenter:
         getNearestDc = tl.help_getNearestDc()
         print(getNearestDc)
 
-        self.send_message(getNearestDc.to_bytes())
+        self.send_plaintext_message(getNearestDc.to_bytes())
         nearestDc = tl.NearestDc(self.recv_message(True))
         # print(nearestDc)
 
@@ -117,7 +117,7 @@ class Datacenter:
     def _req_pq(self):
         nonce = tl.int128_c(self.random.getrandbits(128))
         request = tl.req_pq(nonce)
-        self.send_message(request.to_bytes())
+        self.send_plaintext_message(request.to_bytes())
         res_pq = tl.ResPQ.from_stream(self.recv_message())
 
         assert nonce.value == res_pq.nonce.value
@@ -164,7 +164,7 @@ class Datacenter:
                                          public_key_fingerprint=public_key_fingerprint,
                                          encrypted_data=encrypted_data)
 
-        self.send_message(req_DH_params.to_bytes())
+        self.send_plaintext_message(req_DH_params.to_bytes())
         server_DH_params = tl.Server_DH_Params.from_stream(self.recv_message())
 
         assert server_DH_params.number == tl.server_DH_params_ok_c.number, "failed to get params"
@@ -253,7 +253,7 @@ class Datacenter:
                 encrypted_data=tl.bytes_c.from_bytes(encrypted_data)
                 )
 
-            self.send_message(set_client_DH_params.to_bytes())
+            self.send_plaintext_message(set_client_DH_params.to_bytes())
             set_client_DH_params_answer = tl.Set_client_DH_params_answer.from_stream(self.recv_message())
 
             # print set_client_DH_params_answer
@@ -298,11 +298,15 @@ class Datacenter:
 
         return msg_id
 
-    def send_message(self, message_data):  # package message, not chat message
+    def send_plaintext_message(self, message_data):  # package message, not chat message
+        """
+        Unencrypted Message:
+            auth_key_id = 0:int64   message_id:int64   message_data_length:int32   message_data:bytes
+        """
         # stage 1
         # first one (e.g. req_PQ) message_data == constructor + 16 bytes
         message_id = self.generate_message_id()
-        message = (b'\x00\x00\x00\x00\x00\x00\x00\x00' +  # 8 nulls means unencrypted
+        message = (bytes(8) +  # 8 nulls means unencrypted
                    struct.pack('<Q', message_id) +  # message_id = generated unique sequencial ID
                    struct.pack('<I', len(message_data)) +  # len of the API call (including message_data exclusively)
                    message_data)  # actual RPC call
@@ -317,6 +321,21 @@ class Datacenter:
         # stage 3: append chksum to end
         message += struct.pack('<I', msg_chksum)
         # ^-- raw data sent over socket
+
+        # yay!
+        self.socket.write(message)
+        self.number += 1
+
+    def send_encrypted_message(self, message_data):  # package message, not chat message
+        """
+        Message:
+            auth_key_id:int64 | msg_key:int128 | encrypted_data:bytes
+
+        Encrypted Data:
+            salt:int64 | session_id:int64 | message_id:int64 | seq_no:int32 | message_data_length:int32 | message_data:bytes | padding 0..15:bytes
+        """
+
+        message
 
         # yay!
         self.socket.write(message)
