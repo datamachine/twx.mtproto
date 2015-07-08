@@ -197,6 +197,7 @@ class int_c(_IntBase, TLConstructor):
     __slots__ = ()
 
     number = crc32('int ? = Int'.encode()).to_bytes(4, 'little')
+    name='int'
 
     def _bytes(self):
         return [self.value.to_bytes(4, 'little')]
@@ -279,6 +280,10 @@ class int128_c(_Int128Base, TLConstructor):
     def from_int(_int):
         result = int128_c.__new__(int128_c, _int)
         return result
+
+    @classmethod
+    def from_bytes(cls, obj):
+        return int128_c.from_int(int.from_bytes(obj, byteorder='little'))
 
     @classmethod
     def from_stream(cls, stream, boxed=False):
@@ -728,18 +733,11 @@ class req_DH_params(namedtuple('req_DH_params',
     name = 'req_DH_params'
     ...
 
-"""
-req_pq#60469778 nonce:int128 = ResPQ;
+class set_client_DH_params(namedtuple('set_client_DH_params', ['nonce', 'server_nonce', 'encrypted_data']), TLFunction):
 
-req_DH_params#d712e4be nonce:int128 server_nonce:int128 p:bytes q:bytes public_key_fingerprint:long encrypted_data:bytes = Server_DH_Params;
-
-set_client_DH_params#f5045f1f nonce:int128 server_nonce:int128 encrypted_data:bytes = Set_client_DH_params_answer;
-
-rpc_drop_answer#58e4a740 req_msg_id:long = RpcDropAnswer;
-get_future_salts#b921bd04 num:int = FutureSalts;
-ping#7abe77ec ping_id:long = Pong;
-ping_delay_disconnect#f3427b8c ping_id:long disconnect_delay:int = Pong;
-destroy_session#e7512126 session_id:long = DestroySessionRes;
-
-http_wait#9299359f max_delay:int wait_after:int max_wait:int = HttpWait;
-"""
+    """
+    set_client_DH_params#f5045f1f nonce:int128 server_nonce:int128 encrypted_data:bytes = Set_client_DH_params_answer
+    """
+    number = int(0xf5045f1f).to_bytes(4, byteorder='little')
+    name = 'set_client_DH_params'
+    ...

@@ -11,7 +11,7 @@ from Crypto.Util.number import long_to_bytes, bytes_to_long
 
 from io import BytesIO
 
-from . util import to_hex, crc32
+from . util import to_hex, crc32, print_hex
 
 from . import rpc
 from . import crypt
@@ -91,6 +91,8 @@ class Datacenter:
 
         self.rsa_key = rsa_key
 
+        self.b = self.random.getrandbits(2048)
+
         # Handshake
         self.create_auth_key()
         print(self.auth_key)
@@ -103,10 +105,6 @@ class Datacenter:
     b = Bob's private key known only to Bob. b = 15
     """
 
-    def dh_exhange_initiation(self):
-        # 1) Client sends query to server
-        self._req_pq()
-
     def _req_pq(self):
         nonce = tl.int128_c(self.random.getrandbits(128))
         request = tl.req_pq(nonce)
@@ -117,24 +115,17 @@ class Datacenter:
 
         return res_pq
 
-    def _req_inner_PQ_data(self, resPQ):
-        test_pq = 2081241535702769813
+    def _create_p_q_inner_data(self, resPQ):
+        pq = resPQ.pq.to_int('big')
 
-        #resPQ = resPQ._replace(pq=tl.string_c.from_int(test_pq, byteorder='big'))
-
-        pq = int.from_bytes(resPQ.pq.value, 'big')
-        print(pq, ...)
         p, q = prime.primefactors(pq)
         if p > q:
             p, q = q, p
 
-        assert p * q == pq
-        assert p < q
+        assert p * q == pq and p < q
 
         p_string = tl.string_c.from_int(p, byteorder='big')
         q_string = tl.string_c.from_int(q, byteorder='big')
-
-        key = RSA.importKey(self.rsa_key.strip())
 
         new_nonce = tl.int256_c(self.random.getrandbits(256))
 
@@ -142,122 +133,121 @@ class Datacenter:
 
         assert p_q_inner_data.nonce.value == resPQ.nonce.value
 
-        data = p_q_inner_data.to_boxed_bytes()
+        return p_q_inner_data
 
-        print("Factorization %d = %d * %d" % (pq, p, q))
-        print('PQ:', to_hex(resPQ.pq.value, 4))
-        print('p:', to_hex(p_string.value, 4))
-        print('q:', to_hex(q_string.value, 4))
-        print('pq_io:', to_hex(resPQ.pq.to_bytes() + p_string.to_bytes() + q_string.to_bytes(), 4))
+    def _req_DH_params(self, resPQ, p_q_inner_data):
 
-        print('nonce:', to_hex(resPQ.nonce.to_bytes(), 4))
-        print('server_nonce:', to_hex(resPQ.server_nonce.to_bytes(), 4))
-        print('new_nonce:', to_hex(new_nonce.to_bytes(), 4))
+        key = RSA.importKey(self.rsa_key.strip())
 
-        #print('p_q_inner_data_new: pq:{} p:{} q:{} nonce:{} server_nonce:{} new_nonce:{}'.format(pq, p, q, resPQ.nonce, resPQ.server_nonce, new_nonce))
-        print('p_q_inner_data_new:', to_hex(data, 4))
-
-        sha_digest = SHA.new(data).digest()
         public_key_fingerprint = resPQ.server_public_key_fingerprints.items[0]
 
+        data = p_q_inner_data.to_boxed_bytes()
+        sha_digest = SHA.new(data).digest()
         # get padding of random data to fill what is left after data and sha_digest
         random_bytes = os.urandom(255 - len(data) - len(sha_digest))
         to_encrypt = sha_digest + data + random_bytes  # encrypt cat of sha_digest, data, and padding
         encrypted_data = tl.string_c.from_bytes(key.encrypt(to_encrypt, 0)[0])  # rsa encrypt (key == RSA.key)
 
         # Presenting proof of work; Server authentication
-        req_DH_params = tl.req_DH_params(nonce=resPQ.nonce,
-                                         server_nonce=resPQ.server_nonce,
-                                         p=p_string, q=q_string,
+        req_DH_params = tl.req_DH_params(nonce=p_q_inner_data.nonce,
+                                         server_nonce=p_q_inner_data.server_nonce,
+                                         p=p_q_inner_data.p, q=p_q_inner_data.q,
                                          public_key_fingerprint=public_key_fingerprint,
                                          encrypted_data=encrypted_data)
 
-        req_DH_params2 = rpc.req_DH_params(nonce=resPQ.nonce.to_bytes(),
-                                           server_nonce=resPQ.server_nonce.to_bytes(),
-                                           p=p_string.value, q=q_string.value,
-                                           public_key_fingerprint=public_key_fingerprint.value,
-                                           encrypted_data=encrypted_data.value)
-
-        #print(to_hex(req_DH_params.to_bytes(), 4))
-        #print(to_hex(req_DH_params2.get_bytes(), 4))
-
-        assert req_DH_params.to_bytes() == req_DH_params2.get_bytes()
-
         self.send_message(req_DH_params.to_bytes())
-        return tl.Server_DH_Params.from_stream(self.recv_message())
+        server_DH_params = tl.Server_DH_Params.from_stream(self.recv_message())
 
-
-    def create_auth_key(self):
-
-        # resPQ#05162463 nonce:int128 server_nonce:int128 pq:bytes server_public_key_fingerprints:Vector<long> = ResPQ;
-        resPQ = self._req_pq()
-
-        self._req_inner_PQ_data(resPQ)
-
-        assert False, "TODO: Working up to here"
-
-        # 5) Server responds in one of two ways:
-        server_DH_params = rpc.server_DH_params(data)
-        assert resPQ.nonce == server_DH_params.nonce
+        assert server_DH_params.number == tl.server_DH_params_ok_c.number, "failed to get params"
+        assert resPQ.nonce.value == server_DH_params.nonce.value
         assert resPQ.server_nonce == server_DH_params.server_nonce
 
-        encrypted_answer = server_DH_params.encrypted_answer
+        return server_DH_params
 
-        tmp_aes_key = SHA.new(new_nonce + resPQ.server_nonce).digest()
-        tmp_aes_key += SHA.new(resPQ.server_nonce + new_nonce).digest()[0:12]
+    def _create_tmp_aes_keys(self, p_q_inner_data, server_DH_params):
+        tmp_aes_key = SHA.new(p_q_inner_data.new_nonce.to_bytes() + server_DH_params.server_nonce.to_bytes()).digest()
+        tmp_aes_key += SHA.new(server_DH_params.server_nonce.to_bytes() + p_q_inner_data.new_nonce.to_bytes()).digest()[:12]
 
-        tmp_aes_iv = SHA.new(resPQ.server_nonce + new_nonce).digest()[12:20]
-        tmp_aes_iv = tmp_aes_iv + SHA.new(new_nonce + new_nonce).digest() + new_nonce[0:4]
+        tmp_aes_iv = SHA.new(server_DH_params.server_nonce.to_bytes() + p_q_inner_data.new_nonce.to_bytes()).digest()[12:20]
+        tmp_aes_iv += SHA.new(p_q_inner_data.new_nonce.to_bytes() + p_q_inner_data.new_nonce.to_bytes()).digest()
+        tmp_aes_iv += p_q_inner_data.new_nonce.to_bytes()[0:4]
 
-        answer_with_hash = crypt.ige_decrypt(encrypted_answer, tmp_aes_key, tmp_aes_iv)
-        #                           ^--- decrypting here
+        return tmp_aes_key, tmp_aes_iv
 
-        # answer_hash = answer_with_hash[:20]
+    def _decrypt_Server_DH_inner_data(self, p_q_inner_data, server_DH_params, tmp_aes_key, tmp_aes_iv):
+        answer_with_hash = crypt.ige_decrypt(server_DH_params.encrypted_answer.value, tmp_aes_key, tmp_aes_iv)
+
         answer = answer_with_hash[20:]  # decrypted at this point
 
-        # server_DH_inner_data#b5890dba nonce:int128 server_nonce:int128 g:int dh_prime:string g_a:string server_time:int = Server_DH_inner_data;
-        server_DH_inner_data = rpc.server_DH_inner_data(answer)
-        assert resPQ.nonce == server_DH_inner_data.nonce
-        assert resPQ.server_nonce == server_DH_inner_data.server_nonce
+        server_DH_inner_data = tl.Server_DH_inner_data.from_stream(BytesIO(answer))
 
-        dh_prime_str = server_DH_inner_data.dh_prime
-        g = server_DH_inner_data.g
-        g_a_str = server_DH_inner_data.g_a
-        server_time = server_DH_inner_data.server_time
+        assert server_DH_params.nonce.value == server_DH_inner_data.nonce.value
+        assert server_DH_params.server_nonce.value == server_DH_inner_data.server_nonce.value
+
+        return server_DH_inner_data
+
+    def _create_client_DH_inner_data(self, server_DH_inner_data):
+        dh_prime = server_DH_inner_data.dh_prime.to_int(byteorder='big')
+        g = server_DH_inner_data.g.value
+        g_a = server_DH_inner_data.g_a.to_int(byteorder='big')
+        server_time = server_DH_inner_data.server_time.value
         self.timedelta = server_time - time()  # keep in mind delta is used somewhere later
 
-        dh_prime = bytes_to_long(dh_prime_str)
-        g_a = bytes_to_long(g_a_str)
-
         assert prime.isprime(dh_prime)
-        retry_id = 0
-        b_str = os.urandom(256)
-        b = bytes_to_long(b_str)
+        retry_id = tl.long_c(0)
+        b = self.b
         g_b = pow(g, b, dh_prime)
 
-        g_b_str = long_to_bytes(g_b)
+        g_b_str = tl.bytes_c.from_int(g_b, byteorder='big')
 
-        client_DH_inner_data = rpc.client_DH_inner_data(
-            nonce=resPQ.nonce,
-            server_nonce=resPQ.server_nonce,
+        client_DH_inner_data = tl.client_DH_inner_data_c(
+            nonce=server_DH_inner_data.nonce,
+            server_nonce=server_DH_inner_data.server_nonce,
             retry_id=retry_id,
             g_b=g_b_str)
 
-        data = client_DH_inner_data.get_bytes()
+        return client_DH_inner_data
+
+    def create_auth_key(self):
+        resPQ = self._req_pq()
+        print(resPQ)
+
+        p_q_inner_data = self._create_p_q_inner_data(resPQ)
+        print(p_q_inner_data)
+
+        server_DH_params = self._req_DH_params(resPQ, p_q_inner_data)
+        print(server_DH_params)
+
+        tmp_aes_key, tmp_aes_iv = self._create_tmp_aes_keys(p_q_inner_data, server_DH_params)
+
+        server_DH_inner_data = self._decrypt_Server_DH_inner_data(p_q_inner_data, server_DH_params, tmp_aes_key, tmp_aes_iv)
+        print(server_DH_inner_data)
+
+        client_DH_inner_data = self._create_client_DH_inner_data(server_DH_inner_data)
+        print(client_DH_inner_data)
+
+        data = client_DH_inner_data.to_boxed_bytes()
 
         data_with_sha = SHA.new(data).digest() + data
         data_with_sha_padded = data_with_sha + os.urandom(-len(data_with_sha) % 16)
         encrypted_data = crypt.ige_encrypt(data_with_sha_padded, tmp_aes_key, tmp_aes_iv)
 
+        g_a = server_DH_inner_data.g_a.to_int(byteorder='big')
+        dh_prime = server_DH_inner_data.dh_prime.to_int(byteorder='big')
+        b = self.b
+        new_nonce = p_q_inner_data.new_nonce.to_bytes()
+
         for i in range(1, self.AUTH_MAX_RETRY):  # retry when dh_gen_retry or dh_gen_fail
-            set_client_DH_params = rpc.set_client_DH_params(
+            set_client_DH_params = tl.set_client_DH_params(
                 nonce=resPQ.nonce,
                 server_nonce=resPQ.server_nonce,
-                encrypted_data=encrypted_data)
-            self.send_message(set_client_DH_params.get_bytes())
-            Set_client_DH_params_answer = rpc.set_client_DH_params_answer(self.recv_message())
+                encrypted_data=tl.bytes_c.from_bytes(encrypted_data)
+                )
 
-            # print Set_client_DH_params_answer
+            self.send_message(set_client_DH_params.to_bytes())
+            set_client_DH_params_answer = tl.Set_client_DH_params_answer.from_stream(self.recv_message())
+
+            # print set_client_DH_params_answer
             auth_key = pow(g_a, b, dh_prime)
             auth_key_str = long_to_bytes(auth_key)
             auth_key_sha = SHA.new(auth_key_str).digest()
@@ -267,23 +257,24 @@ class Datacenter:
             new_nonce_hash2 = SHA.new(new_nonce+b'\x02'+auth_key_aux_hash).digest()[-16:]
             new_nonce_hash3 = SHA.new(new_nonce+b'\x03'+auth_key_aux_hash).digest()[-16:]
 
-            assert Set_client_DH_params_answer.nonce == resPQ.nonce
-            assert Set_client_DH_params_answer.server_nonce == resPQ.server_nonce
+            assert set_client_DH_params_answer.nonce == resPQ.nonce
+            assert set_client_DH_params_answer.server_nonce == resPQ.server_nonce
 
-            if Set_client_DH_params_answer.status == 'ok':
-                assert Set_client_DH_params_answer.new_nonce_hash == new_nonce_hash1
+            if set_client_DH_params_answer.number == tl.dh_gen_ok_c.number:
+                print(set_client_DH_params_answer.new_nonce_hash1, new_nonce_hash1)
+                assert set_client_DH_params_answer.new_nonce_hash1.to_bytes() == new_nonce_hash1
                 print("Diffie Hellman key exchange processed successfully")
 
-                self.server_salt = strxor(new_nonce[0:8], resPQ.server_nonce[0:8])
+                self.server_salt = strxor(new_nonce[0:8], resPQ.server_nonce.to_bytes()[0:8])
                 self.auth_key = auth_key_str
                 self.auth_key_id = auth_key_sha[-8:]
                 print("Auth key generated")
                 return "Auth Ok"
-            elif Set_client_DH_params_answer.status == 'retry':
-                assert Set_client_DH_params_answer.new_nonce_hash == new_nonce_hash2
+            elif set_client_DH_params_answer.number == tl.dh_gen_retry_c.number:
+                assert set_client_DH_params_answer.new_nonce_hash2.to_bytes() == new_nonce_hash2
                 print("Retry Auth")
-            elif Set_client_DH_params_answer.status == 'fail':
-                assert Set_client_DH_params_answer.new_nonce_hash == new_nonce_hash3
+            elif set_client_DH_params_answer.status == tl.dh_gen_fail_c.number:
+                assert set_client_DH_params_answer.new_nonce_hash3.to_bytes() == new_nonce_hash3
                 print("Auth Failed")
                 raise Exception("Auth Failed")
             else:
@@ -330,15 +321,13 @@ class Datacenter:
             packet = self.socket.read(1024)  # reads how many bytes to read
             hexdump(packet)
 
-        packet_bytes = self.socket.read(1024)
-        packet_io = BytesIO(packet_bytes)
+        packet_length_data = self.socket.read(4)  # total length of the message
+        assert len(packet_length_data) == 4
 
-        packet_length_data = packet_io.read(4)  # reads how many bytes to read
         packet_length = int.from_bytes(packet_length_data, 'little')
 
-        print('packet:', to_hex(packet_length_data), packet_length, len(packet_bytes), to_hex(packet_bytes, 4))
-
-        packet = packet_io.read(packet_length)
+        packet = self.socket.read(packet_length - 4)
+        print('packet:', to_hex(packet_length_data), packet_length, len(packet), to_hex(packet))
 
         # packet = self.socket.read(packet_length)
         # packet_io = BytesIO(packet)
@@ -348,7 +337,7 @@ class Datacenter:
             raise Exception("CRC32 was not correct!")
 
         auth_key_id = packet[4:12]
-
+        # print('auth_key_id:', auth_key_id)
         if auth_key_id == b'\x00\x00\x00\x00\x00\x00\x00\x00':
             # No encryption - Plain text
             (message_id, message_length) = struct.unpack("<QI", packet[12:24])

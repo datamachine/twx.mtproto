@@ -6,7 +6,7 @@ import zlib
 logging.basicConfig(filename='debug.log', level=logging.DEBUG)
 
 
-def to_hex(_bytes, width=0):
+def to_hex(_bytes, width=4):
     string = ""
     bytes_iter = iter(_bytes)
     try:
@@ -21,6 +21,9 @@ def to_hex(_bytes, width=0):
             string += " "
     except StopIteration:
         return string
+
+def print_hex(_bytes, width=4):
+    print(to_hex(_bytes, width))
 
 
 def crc32(data):
