@@ -1,0 +1,17 @@
+# App configuration
+[app]
+api_id=<app id>
+api_hash=<api hash>
+app_title=<app title>
+short_name=<short name>
+
+# Available MTProto servers
+[servers]
+test_dc=tcp://149.154.167.40:443
+production_dc=tcp://149.154.167.50:443
+
+public_keys=
+    -----BEGIN RSA PUBLIC KEY-----
+    <key goes here>
+    -----END RSA PUBLIC KEY-----
+
