@@ -25,13 +25,13 @@ class TLObject(metaclass=ABCMeta):
     __slots__ = ()
 
     def to_bytes(self):
-        return b''.join(self._bytes())
+        return b''.join(self._buffers())
 
     def hex_components(self):
-        return ' '.join([to_hex(data) for data in self._bytes()])
+        return ' '.join([to_hex(data) for data in self._buffers()])
 
     @abstractmethod
-    def _bytes(self):
+    def _buffers(self):
         """A list of bytes() (one item for each component of the combinator)"""
         raise NotImplementedError()
 
@@ -107,7 +107,7 @@ class TLCombinator(TLObject):
     def hex_components(self, boxed=False):
         result = ['{}:{}'.format(self.name, to_hex(self.number, 4))] if boxed else ['{}: '.format(self.name)]
         for arg in self:
-            result += ['{}:{}'.format(arg.name, to_hex(b''.join(arg._bytes()), 4))]
+            result += ['{}:{}'.format(arg.name, to_hex(b''.join(arg._buffers()), 4))]
         return " ".join(result)
 
     @abstractstaticmethod
@@ -122,7 +122,7 @@ class TLCombinator(TLObject):
             return to_hex(self.to_boxed_bytes(), width)
         return to_hex(self.to_bytes(), width)
 
-    def _bytes(self):
+    def _buffers(self):
         raise NotImplementedError()
 
     @classmethod
@@ -143,10 +143,10 @@ class TLCombinator(TLObject):
 
 class TLConstructor(TLCombinator):
 
-    def _bytes(self, boxed=False):
+    def _buffers(self, boxed=False):
         result = [self.number] if boxed else []
         for arg in self:
-            result += arg._bytes()
+            result += arg._buffers()
         return result
 
     @classmethod
@@ -199,7 +199,7 @@ class int_c(_IntBase, TLConstructor):
     number = crc32('int ? = Int'.encode()).to_bytes(4, 'little')
     name='int'
 
-    def _bytes(self):
+    def _buffers(self):
         return [self.value.to_bytes(4, 'little')]
 
     @staticmethod
@@ -223,7 +223,7 @@ class long_c(_LongBase, TLConstructor):
     number = crc32('long ? = Long'.encode()).to_bytes(4, 'little')
     name = 'long_c'
 
-    def _bytes(self):
+    def _buffers(self):
         return [self.value.to_bytes(8, 'little')]
 
     @staticmethod
@@ -245,7 +245,7 @@ class vector_c(_VectorBase, TLConstructor):
     def __new__(cls, item_type, num=None, items=None):
         return super().__new__(cls, item_type, num, items)
 
-    def _bytes(self):
+    def _buffers(self):
         return [item.to_bytes() for item in self.items]
 
     @staticmethod
@@ -273,7 +273,7 @@ class int128_c(_Int128Base, TLConstructor):
     param_types = _Int128Base(int)
     name = 'int128'
 
-    def _bytes(self):
+    def _buffers(self):
         return [self.value.to_bytes(16, 'little')]
 
     @staticmethod
@@ -294,7 +294,7 @@ class int256_c(_Int128Base, TLConstructor):
     number = crc32('int 4*[ int ] = Int128'.encode()).to_bytes(4, 'little')
     param_types = _Int128Base(int)
 
-    def _bytes(self):
+    def _buffers(self):
         return [self.value.to_bytes(32, 'little')]
 
     @staticmethod
@@ -336,7 +336,7 @@ class string_c(_StringBase, TLConstructor):
         print(self.pfx_length(), self.value_length(), self.padding_length(), ...)
         return self.pfx_length() + self.value_length() + self.padding_length()
 
-    def _bytes(self):
+    def _buffers(self):
         return [self.pfx() + self.value + self.padding()]
 
     @classmethod
@@ -699,7 +699,6 @@ msg_detailed_info_c = create_constructor(
 
 
 
-
 """
 ---functions---
 """
@@ -707,10 +706,10 @@ msg_detailed_info_c = create_constructor(
 
 class TLFunction(TLCombinator):
 
-    def _bytes(self):
+    def _buffers(self):
         result = [self.number]
         for arg in self:
-            result += arg._bytes()
+            result += arg._buffers()
         return result
 
 
@@ -741,3 +740,26 @@ class set_client_DH_params(namedtuple('set_client_DH_params', ['nonce', 'server_
     number = int(0xf5045f1f).to_bytes(4, byteorder='little')
     name = 'set_client_DH_params'
     ...
+
+
+"""
+--main api testing--
+"""
+
+"""
+nearestDc#8e1a1775 country:string this_dc:int nearest_dc:int = NearestDc;
+help.getNearestDc#1fb33026 = NearestDc;
+"""
+class NearestDc(TLType):
+    constructors = {}
+
+nearestDC_c = create_constructor(
+    name='nearestDC', number=0x8e1a1775,
+    params=['country', 'this_dc', 'nearest_dc'],
+    param_types=[string_c, int_c, int_c],
+    result_type=NearestDc)
+
+class help_getNearestDc(namedtuple('getNearestDc', []), TLFunction):
+    number = int(0x1fb33026).to_bytes(4, 'little')
+    name = 'getNearestDc'
+    result_type = NearestDc

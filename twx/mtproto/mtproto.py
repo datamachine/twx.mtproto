@@ -95,8 +95,17 @@ class Datacenter:
 
         # Handshake
         self.create_auth_key()
-        print(self.auth_key)
-        print(self.server_salt)
+        self.test_api()
+        # print(self.auth_key)
+        # print(self.server_salt)
+
+    def test_api(self):
+        getNearestDc = tl.help_getNearestDc()
+        print(getNearestDc)
+
+        self.send_message(getNearestDc.to_bytes())
+        nearestDc = tl.NearestDc(self.recv_message(True))
+        # print(nearestDc)
 
     """
     g = public (prime) base, known to Alice, Bob, and Eve. g = 5
@@ -319,7 +328,7 @@ class Datacenter:
         """
         if debug:
             packet = self.socket.read(1024)  # reads how many bytes to read
-            hexdump(packet)
+            print('debug packet:', to_hex(packet))
 
         packet_length_data = self.socket.read(4)  # total length of the message
         assert len(packet_length_data) == 4
