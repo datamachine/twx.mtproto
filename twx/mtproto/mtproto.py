@@ -5,14 +5,14 @@ from time import time
 from collections import OrderedDict
 
 from random import SystemRandom
-from Crypto.Hash import SHA
 from Crypto.PublicKey import RSA
 from Crypto.Util.strxor import strxor
 from Crypto.Util.number import long_to_bytes, bytes_to_long
 
 from io import BytesIO
 
-from . util import to_hex, crc32, print_hex
+from . util import to_hex, crc32, print_hex, substr
+from . crypt import SHA1
 
 from . import rpc
 from . import crypt
@@ -20,9 +20,12 @@ from . import prime
 
 from . import tl
 
+from . authkey import MTProtoAuthKey, aes_encrypt
+
 import sys
 import logging
 log = logging.getLogger(__name__)
+
 
 
 class MTProto:
@@ -93,8 +96,7 @@ class Datacenter:
         self.number = 0
 
         self.authorized = False
-        self.auth_key = None
-        self.auth_key_id = None
+        self.auth_key = MTProtoAuthKey()
         self.server_salt = None
         self.server_time = None
 
@@ -104,7 +106,6 @@ class Datacenter:
         self.rsa_key = rsa_key
 
         self.b = self.random.getrandbits(2048)
-
 
         # Handshake
         self.create_auth_key()
@@ -116,7 +117,7 @@ class Datacenter:
         getNearestDc = tl.help_getNearestDc()
         print(getNearestDc)
 
-        self.send_encrypted_message(getNearestDc)
+        self.send_encrypted_message(getNearestDc.to_bytes())
         # nearestDc = tl.NearestDc(self.recv_message(True))
         # print(nearestDc)
 
@@ -164,7 +165,7 @@ class Datacenter:
         public_key_fingerprint = self.resPQ.server_public_key_fingerprints.items[0]
 
         data = self.p_q_inner_data.to_boxed_bytes()
-        sha_digest = SHA.new(data).digest()
+        sha_digest = SHA1(data)
         # get padding of random data to fill what is left after data and sha_digest
         random_bytes = os.urandom(255 - len(data) - len(sha_digest))
         to_encrypt = sha_digest + data + random_bytes  # encrypt cat of sha_digest, data, and padding
@@ -187,11 +188,11 @@ class Datacenter:
         return server_DH_params
 
     def _create_tmp_aes_keys(self):
-        tmp_aes_key = SHA.new(self.p_q_inner_data.new_nonce.to_bytes() + self.server_DH_params.server_nonce.to_bytes()).digest()
-        tmp_aes_key += SHA.new(self.server_DH_params.server_nonce.to_bytes() + self.p_q_inner_data.new_nonce.to_bytes()).digest()[:12]
+        tmp_aes_key = SHA1(self.p_q_inner_data.new_nonce.to_bytes() + self.server_DH_params.server_nonce.to_bytes())
+        tmp_aes_key += SHA1(self.server_DH_params.server_nonce.to_bytes() + self.p_q_inner_data.new_nonce.to_bytes())[:12]
 
-        tmp_aes_iv = SHA.new(self.server_DH_params.server_nonce.to_bytes() + self.p_q_inner_data.new_nonce.to_bytes()).digest()[12:20]
-        tmp_aes_iv += SHA.new(self.p_q_inner_data.new_nonce.to_bytes() + self.p_q_inner_data.new_nonce.to_bytes()).digest()
+        tmp_aes_iv = SHA1(self.server_DH_params.server_nonce.to_bytes() + self.p_q_inner_data.new_nonce.to_bytes())[12:20]
+        tmp_aes_iv += SHA1(self.p_q_inner_data.new_nonce.to_bytes() + self.p_q_inner_data.new_nonce.to_bytes())
         tmp_aes_iv += self.p_q_inner_data.new_nonce.to_bytes()[0:4]
 
         return tmp_aes_key, tmp_aes_iv
@@ -250,7 +251,7 @@ class Datacenter:
 
         data = self.client_DH_inner_data.to_boxed_bytes()
 
-        data_with_sha = SHA.new(data).digest() + data
+        data_with_sha = SHA1(data) + data
         data_with_sha_padded = data_with_sha + os.urandom(-len(data_with_sha) % 16)
         encrypted_data = crypt.ige_encrypt(data_with_sha_padded, self.tmp_aes_key, self.tmp_aes_iv)
 
@@ -274,12 +275,12 @@ class Datacenter:
             # print set_client_DH_params_answer
             auth_key = pow(g_a, b, dh_prime)
             auth_key_str = long_to_bytes(auth_key)
-            auth_key_sha = SHA.new(auth_key_str).digest()
+            auth_key_sha = SHA1(auth_key_str)
             auth_key_aux_hash = auth_key_sha[:8]
 
-            new_nonce_hash1 = SHA.new(new_nonce+b'\x01'+auth_key_aux_hash).digest()[-16:]
-            new_nonce_hash2 = SHA.new(new_nonce+b'\x02'+auth_key_aux_hash).digest()[-16:]
-            new_nonce_hash3 = SHA.new(new_nonce+b'\x03'+auth_key_aux_hash).digest()[-16:]
+            new_nonce_hash1 = SHA1(new_nonce+b'\x01'+auth_key_aux_hash)[-16:]
+            new_nonce_hash2 = SHA1(new_nonce+b'\x02'+auth_key_aux_hash)[-16:]
+            new_nonce_hash3 = SHA1(new_nonce+b'\x03'+auth_key_aux_hash)[-16:]
 
             assert set_client_DH_params_answer.nonce == self.resPQ.nonce
             assert set_client_DH_params_answer.server_nonce == self.resPQ.server_nonce
@@ -290,8 +291,7 @@ class Datacenter:
                 print("Diffie Hellman key exchange processed successfully")
 
                 self.server_salt = strxor(new_nonce[0:8], self.resPQ.server_nonce.to_bytes()[0:8])
-                self.auth_key = auth_key_str
-                self.auth_key_id = auth_key_sha[-8:]
+                self.auth_key.set_key(auth_key_str)
                 print("Auth key generated")
                 return "Auth Ok"
             elif set_client_DH_params_answer.number == tl.dh_gen_retry_c.number:
@@ -341,43 +341,8 @@ class Datacenter:
         self.socket.write(message)
         self.number += 1
 
-    def _create_message_aes_key(self, msg_key):
-        """
-        Defining AES Key and Initialization Vector
 
-        The 2048-bit authorization key (auth_key) and the 128-bit message key (msg_key) are used to compute a
-        56-bit AES key (aes_key) and a 256-bit initialization vector (aes_iv) which are subsequently used to
-        encrypt the part of the message to be encrypted (i. e. everything with the exception of the external
-            header which is added later) with AES-256 in infinite garble extension (IGE) mode.
-
-        The algorithm for computing aes_key and aes_iv from auth_key and msg_key is as follows:
-
-            sha1_a = SHA1 (msg_key + substr (auth_key, x, 32));
-            sha1_b = SHA1 (substr (auth_key, 32+x, 16) + msg_key + substr (auth_key, 48+x, 16));
-            sha1_с = SHA1 (substr (auth_key, 64+x, 32) + msg_key);
-            sha1_d = SHA1 (msg_key + substr (auth_key, 96+x, 32));
-            aes_key = substr (sha1_a, 0, 8) + substr (sha1_b, 8, 12) + substr (sha1_c, 4, 12);
-            aes_iv = substr (sha1_a, 8, 12) + substr (sha1_b, 0, 8) + substr (sha1_c, 16, 4) + substr (sha1_d, 0, 8);
-
-        where x = 0 for messages from client to server and x = 8 for those from server to client.
-
-        The lower-order 1024 bits of auth_key are not involved in the computation. They may (together with the
-        remaining bits or separately) be used on the client device to encrypt the local copy of the data
-        received from the server. The 512 lower-order bits of auth_key are not stored on the server;
-        therefore, if the client device uses them to encrypt local data and the user loses the key or the
-        password, data decryption of local data is impossible (even if data from the server could be obtained).
-
-        When AES is used to encrypt a block of data of a length not divisible by 16 bytes, the data is padded
-        with random bytes to the smallest length divisible by 16 bytes immediately prior to being encrypted.
-        """
-        sha1_a = ...
-        sha1_b = ...
-        sha1_c = ...
-        sha1_d = ...
-        aes_key = ...
-        aes_iv = ...
-
-    def send_encrypted_message(self, tl_function):  # package message, not chat message
+    def send_encrypted_message(self, message_data):  # package message, not chat message
         """
         Ecrypted Message:
             auth_key_id:int64 | msg_key:int128 | encrypted_data:bytes
@@ -386,69 +351,46 @@ class Datacenter:
             salt:int64 | session_id:int64 | message_id:int64 | seq_no:int32 | message_data_length:int32 | message_data:bytes | padding 0..15:bytes
         """
 
-        if self.auth_key_id is None:
-            raise ValueError('auth_key_id is not set')
-
         if self.session_id is None:
             self.session_id = self.random.getrandbits(64)
 
-        message_data = tl_function.to_bytes()
-        message_data_length = len(message_data).to_bytes(4, 'little')
-        seq_no = self.number.to_bytes(4, 'little')
-        message_id = self.generate_message_id().to_bytes(8, 'little')
-        session_id = self.session_id.to_bytes(8, 'little')
         salt = self.server_salt
+        session_id = self.session_id.to_bytes(8, 'little')
+        message_id = self.generate_message_id().to_bytes(8, 'little')
+        seq_no = self.number.to_bytes(4, 'little')
+        message_data_length = len(message_data).to_bytes(4, 'little')
 
-        plaintext_message_parts = OrderedDict()
-        plaintext_message_parts['salt'] = salt
-        plaintext_message_parts['session_id'] = session_id
-        plaintext_message_parts['message_id'] = message_id
-        plaintext_message_parts['seq_no'] = seq_no
-        plaintext_message_parts['message_data_length'] = message_data_length
-        plaintext_message_parts['message_data'] = message_data
+        plaintext_message_parts = [
+            salt, session_id, message_id, seq_no, message_data_length
+        ]
 
-        print('plaintext_message_parts:')
-        for key, item in plaintext_message_parts.items():
-            print('    {:<20s}:'.format(key), to_hex(item))
+        plaintext_message_data = b''.join(plaintext_message_parts)
 
-        plaintext_message_data = b''.join(plaintext_message_parts.values())
-
-        print('plaintext_message_data  :', to_hex(plaintext_message_data))
-
-        msg_key = sha_digest = SHA.new(plaintext_message_data).digest()[-16:]
+        msg_key = sha_digest = SHA1(plaintext_message_data)[-16:]
 
         plaintext_message_padding = os.urandom((16 - len(plaintext_message_data) % 16) % 16)
         plaintext_message_data = b''.join([plaintext_message_data, plaintext_message_padding])
+
         assert len(plaintext_message_data) % 16 == 0
 
-        encrypted_data = crypt.ige_encrypt(plaintext_message_data, self.tmp_aes_key, self.tmp_aes_iv)
+        encrypted_data = aes_encrypt(plaintext_message_data, self.auth_key, msg_key)
 
-        encrypted_message_parts = OrderedDict()
-        encrypted_message_parts['auth_key_id'] = self.auth_key_id
-        encrypted_message_parts['msg_key'] = msg_key
-        encrypted_message_parts['encrypted_data'] = encrypted_data
+        encrypted_message_parts = [
+            self.auth_key.key_id,
+            msg_key,
+            encrypted_data
+        ]
 
-        print('encrypted_message_parts:')
-        for key, item in encrypted_message_parts.items():
-            print('    {:<20s}:'.format(key), to_hex(item))
+        encrypted_message = b''.join(encrypted_message_parts)
 
-        encrypted_message = b''.join(encrypted_message_parts.values())
-
-        msg_chksum = crc32(encrypted_message).to_bytes(4, 'little')
-
-        message = b''.join([encrypted_message, msg_chksum])
-
-        print('encrypted_message       :', to_hex(encrypted_message))
-
-        self.socket.write(message)
+        self.socket.write(encrypted_data)
         data = self.socket.read(1024)
-
         print('recieved_data:', to_hex(data))
 
         raise NotImplementedError()
 
         # yay!
-        #self.socket.write(message)
+        # self.socket.write(message)
         self.number += 1
 
     def recv_message(self, debug=False):
@@ -480,7 +422,7 @@ class Datacenter:
             # No encryption - Plain text
             (message_id, message_length) = struct.unpack("<QI", packet[12:24])
             return BytesIO(packet[24:24+message_length])
-        elif auth_key_id == self.auth_key_id:
+        elif auth_key_id == self.auth_key.key_id:
             message_key = packet[12:28]
             encrypted_data = packet[28:-4]
             aes_key, aes_iv = self.aes_calculate(message_key, direction="from server")

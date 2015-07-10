@@ -5,6 +5,9 @@ import zlib
 
 logging.basicConfig(filename='debug.log', level=logging.DEBUG)
 
+def substr(string, pos, length):
+    return string[pos:pos+length]
+
 def to_hex(_bytes, width=4):
     if len(_bytes) == 0:
         return None

@@ -9,6 +9,7 @@
 from __future__ import print_function
 from Crypto.Util.strxor import strxor
 from Crypto.Cipher import AES
+from Crypto.Hash import SHA
 
 import logging
 log = logging.getLogger(__name__)
@@ -16,6 +17,8 @@ log = logging.getLogger(__name__)
 # AES 256 IGE part
 
 
+def SHA1(data):
+    return SHA.new(data).digest()
 
 def ige_encrypt(message, key, iv):
     return _ige(message, key, iv, operation="encrypt")
@@ -72,3 +75,60 @@ def _ige(message, key, iv, operation="decrypt"):
             raise ValueError("operation must be either 'decrypt' or 'encrypt'")
         ciphered += outdata
     return ciphered
+
+class AESKey(bytes):
+
+    def __new__(cls, value):
+        value = bytes(value)
+
+        bit_length = len(value) * 8
+
+        if bit_length == AES256Key.bit_length:
+            cls = AES256Key
+        else:
+            raise ValueError('Unsupported AES key bit length: {}'.format(bit_length))
+
+        return cls._from_bytes(value)
+
+class AES256Key(AESKey):
+
+    bit_length = 256
+
+    def __new__(cls, value):
+        return super(AES256Key, cls).__new__(cls, value)
+
+    @classmethod
+    def _from_bytes(cls, value):
+        result = bytes.__new__(cls, value)
+        if len(result) != 32:
+            raise ValueError('value must be 256 bits (32 bytes)'.format(bit_length))
+        return result
+
+
+class RSAKey(bytes):
+
+    def __new__(cls, value):
+        value = bytes(value)
+
+        bit_length = len(value) * 8
+
+        if bit_length == RSA2048Key.bit_length:
+            cls = RSA2048Key
+        else:
+            raise ValueError('Unsupported RSAKey key bit length: {}'.format(bit_length))
+
+        return cls._from_bytes(value)
+
+class RSA2048Key(RSAKey):
+
+    bit_length = 2048
+
+    def __new__(cls, value):
+        return super(RSA2048Key, cls).__new__(cls, value)
+
+    @classmethod
+    def _from_bytes(cls, value):
+        result = bytes.__new__(cls, value)
+        if len(result) != 256:
+            raise ValueError('value must be 2048 bits (256 bytes)'.format(bit_length))
+        return result
