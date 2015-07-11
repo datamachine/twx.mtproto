@@ -20,13 +20,11 @@ from . import prime
 
 from . import tl
 
-from . authkey import MTProtoAuthKey, aes_encrypt
+from . authkey import MTProtoAuthKey, aes_encrypt, aes_decrypt
 
 import sys
 import logging
 log = logging.getLogger(__name__)
-
-
 
 class MTProto:
 
@@ -376,6 +374,9 @@ class Datacenter:
         encrypted_message = b''.join(encrypted_message_parts)
 
         self.send_tcp_message(encrypted_message)
+        self.recv_encrypted_message()
+
+        sys.exit(1)
 
     def send_tcp_message(self, payload):
         tcp_message_parts = [
@@ -397,6 +398,68 @@ class Datacenter:
         # yay!
         # self.socket.write(message)
         self.number += 1
+
+    def recv_encrypted_message(self):
+        payload = self.recv_tcp_message()
+
+        auth_key_id = payload[0:8]
+        msg_key = payload[8:24]
+        encrypted_data = payload[24:]
+
+        plaintext_message = aes_decrypt(encrypted_data, self.auth_key, msg_key)
+
+        salt = plaintext_message[0:8]
+        session_id = plaintext_message[8:16]
+        message_id = plaintext_message[16:24]
+        seq_no = plaintext_message[24:28]
+        message_data_length = plaintext_message[28:32]
+        message_data_length = int.from_bytes(message_data_length, 'little')
+        message_data = plaintext_message[32:32+message_data_length]
+
+        print('message_data:', to_hex(message_data))
+
+        """
+        at this point, message_data looks a lot like this:
+        message_data: 
+            Msg container -> DCF8F173
+                Vector<%Message>
+                num_items:int -> 02000000 
+                    %Message:
+                        message_id:long -> 01D40F39 3BBFA055 
+                        seq_no:int -> 01000000 
+                        bytes:int -> 1C000000
+                        body:Object -> 
+                            new_session_created -> 0809C29E 
+                                first_msg_id:long -> 00C8A02B 3BBFA055
+                                unique_id:long -> 1A1D5711 00A96EC3
+                                server_salt:long -> 74EEA560 D1AB64E3
+                    %Message:
+                        message_id -> 01541139 3BBFA055
+                        seq_no:int -> 02000000
+                        bytes:int -> 14000000
+                        body:Object -> 
+                            msg_acks -> 59B4D662 
+
+                                Vector<long> -> 15C4B51C 
+                                    count -> 01000000
+                                    long -> 00C8A02B 3BBFA055
+        """
+
+
+    def recv_tcp_message(self):
+
+        header = self.socket.read(8)
+        length = int.from_bytes(header[0:4], 'little')
+        tcp_seq_no = int.from_bytes(header[4:], 'little')
+
+        payload = self.socket.read(length - 12)  # length - len(header) - len(payload_crc)
+
+        payload_crc = int.from_bytes(self.socket.read(4), 'little')
+
+        if crc32(header + payload) != payload_crc:
+            raise ValueError('payload checksum for tcp does not match')
+
+        return payload
 
     def recv_message(self, debug=False):
         """

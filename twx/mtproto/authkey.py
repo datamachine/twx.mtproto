@@ -1,7 +1,7 @@
 from collections import namedtuple
 
 from . coretypes import MTProtoKeyNotReadyError
-from . crypt import SHA1, RSA2048Key, AES256Key, ige_encrypt
+from . crypt import SHA1, RSA2048Key, AES256Key, ige_encrypt, ige_decrypt
 from . util import substr
 
 def _aes_encrypt(data, aes_key, aes_iv):
@@ -10,6 +10,13 @@ def _aes_encrypt(data, aes_key, aes_iv):
 def aes_encrypt(data, auth_key, msg_key):
     aes_key, aes_iv = auth_key.prepare_aes(msg_key)
     return _aes_encrypt(data, aes_key, aes_iv)
+
+def _aes_decrypt(data, aes_key, aes_iv):
+    return ige_decrypt(data, aes_key, aes_iv)
+
+def aes_decrypt(data, auth_key, msg_key):
+    aes_key, aes_iv = auth_key.prepare_aes(msg_key, True)
+    return _aes_decrypt(data, aes_key, aes_iv)
 
 def aes_encrypt_local(data, auth_key, msg_key):
     aes_key, aes_iv = auth_key.prepare_aes(msg_key, False)
@@ -44,7 +51,7 @@ class MTProtoAuthKey:
 
         return self._key_id
 
-    def prepare_aes(self, msg_key, send=True):
+    def prepare_aes(self, msg_key, from_server=False):
         """
         Defining AES Key and Initialization Vector
 
@@ -78,7 +85,7 @@ class MTProtoAuthKey:
 
         # TelegramDesktop uses condition "x = 8 if send else 0"
         # But that seems in contradiction to the statement above
-        x = 0
+        x = 8 if from_server else 0
 
         sha1_a = SHA1(msg_key + substr(auth_key, x, 32))
         sha1_b = SHA1(substr(auth_key, 32+x, 16) + msg_key + substr(auth_key, 48+x, 16))
