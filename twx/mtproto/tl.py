@@ -188,8 +188,6 @@ def create_constructor(name, number, params, param_types, result_type):
     result_type.add_constuctor(new_type)
     return new_type
 
-_DoubleBase = namedtuple('double', 'value')
-_StringBase = namedtuple('String', 'value')
 
 class Int(int, TLType):
     constructors = {}
@@ -198,26 +196,8 @@ class Int(int, TLType):
         if isinstance(value, bytes):
             return int_c.from_bytes()
 
-        if isinstance(value, int):
-            return int_c.from_int(value)
+        return int_c.from_int(int(value))
 
-        raise ValueError('cannot convert type {} to Int'.format(type(value)))
-
-class Long(int, TLType):
-    constructors = {}
-
-    def __new__(cls, value):
-        if isinstance(value, bytes):
-            return long_c.from_bytes()
-
-        if isinstance(value, int):
-            return long_c.from_int(value)
-
-        raise ValueError('cannot convert type {} to Long'.format(type(value)))
-
-
-Double = type('Double', (TLType,), dict(constructors={}))
-String = type('String', (TLType,), dict(constructors={}))
 
 class int_c(Int, TLConstructor):
 
@@ -253,6 +233,17 @@ class int_c(Int, TLConstructor):
         return cls.from_bytes(stream.read(4))
 Int.add_constuctor(int_c)
 
+
+class Long(int, TLType):
+    constructors = {}
+
+    def __new__(cls, value):
+        if isinstance(value, bytes):
+            return long_c.from_bytes()
+
+        return long_c.from_int(int(value))
+
+
 class long_c(Long, TLConstructor):
 
     """
@@ -265,7 +256,6 @@ class long_c(Long, TLConstructor):
     _struct = Struct('<q')
 
     def to_buffers(self):
-        print(self.to_bytes(), ...)
         return [self.to_bytes()]
 
     def to_bytes(self):
@@ -287,6 +277,48 @@ class long_c(Long, TLConstructor):
     def from_stream(cls, stream):
         return cls.from_bytes(stream.read(8))
 Long.add_constuctor(long_c)
+
+
+class Double(int, TLType):
+    constructors = {}
+
+    def __new__(cls, value):
+        if isinstance(value, bytes):
+            return double_c.from_bytes()
+
+        return double_c.from_float(float(value))
+
+
+class double_c(Double, TLConstructor):
+
+    """
+    double ? = Double
+    """
+    __slots__ = ()
+
+    number = encoded_combinator_number('double ? = Double')
+    name = 'double'
+    _struct = Struct('<d')
+
+    def to_buffers(self):
+        return [self.to_bytes()]
+
+    def to_bytes(self):
+        return self._struct.pack(self)
+
+    @classmethod
+    def from_bytes(cls, data):
+        value = cls._struct.unpack(data)[0]
+        return float.__new__(cls, value)
+
+    @classmethod
+    def from_float(cls, value):
+        return float.__new__(cls, value)
+
+    @classmethod
+    def from_stream(cls, stream):
+        return cls.from_bytes(stream.read(8))
+Double.add_constuctor(double_c)
 
 
 class vector_c(_VectorBase, TLConstructor):
@@ -359,6 +391,9 @@ class int256_c(_Int128Base, TLConstructor):
         return int128_c.from_int(int.from_bytes(stream.read(32), byteorder='little'))
 Int256.add_constuctor(int256_c)
 
+
+_StringBase = namedtuple('String', 'value')
+String = type('String', (TLType,), dict(constructors={}))
 
 class string_c(_StringBase, TLConstructor):
 
