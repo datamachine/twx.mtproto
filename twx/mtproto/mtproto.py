@@ -210,9 +210,9 @@ class Datacenter:
 
     def _create_client_DH_inner_data(self):
         dh_prime = self.server_DH_inner_data.dh_prime.to_int(byteorder='big')
-        g = self.server_DH_inner_data.g.value
+        g = self.server_DH_inner_data.g
         g_a = self.server_DH_inner_data.g_a.to_int(byteorder='big')
-        server_time = self.server_DH_inner_data.server_time.value
+        server_time = self.server_DH_inner_data.server_time
         self.timedelta = server_time - time()  # keep in mind delta is used somewhere later
 
         assert prime.isprime(dh_prime)

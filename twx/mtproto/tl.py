@@ -3,6 +3,7 @@ from collections import namedtuple
 from functools import partial
 from enum import Enum
 from collections import OrderedDict
+from struct import Struct
 
 from . util import to_hex, crc32
 
@@ -25,13 +26,13 @@ class TLObject(metaclass=ABCMeta):
     __slots__ = ()
 
     def to_bytes(self):
-        return b''.join(self._buffers())
+        return b''.join(self.to_buffers())
 
     def hex_components(self):
-        return ' '.join([to_hex(data) for data in self._buffers()])
+        return ' '.join([to_hex(data) for data in self.to_buffers()])
 
     @abstractmethod
-    def _buffers(self):
+    def to_buffers(self):
         """A list of bytes() (one item for each component of the combinator)"""
         raise NotImplementedError()
 
@@ -107,7 +108,7 @@ class TLCombinator(TLObject):
     def hex_components(self, boxed=False):
         result = ['{}:{}'.format(self.name, to_hex(self.number, 4))] if boxed else ['{}: '.format(self.name)]
         for arg in self:
-            result += ['{}:{}'.format(arg.name, to_hex(b''.join(arg._buffers()), 4))]
+            result += ['{}:{}'.format(arg.name, to_hex(b''.join(arg.to_buffers()), 4))]
         return " ".join(result)
 
     @abstractstaticmethod
@@ -122,7 +123,7 @@ class TLCombinator(TLObject):
             return to_hex(self.to_boxed_bytes(), width)
         return to_hex(self.to_bytes(), width)
 
-    def _buffers(self):
+    def to_buffers(self):
         raise NotImplementedError()
 
     @classmethod
@@ -143,10 +144,10 @@ class TLCombinator(TLObject):
 
 class TLConstructor(TLCombinator):
 
-    def _buffers(self, boxed=False):
+    def to_buffers(self, boxed=False):
         result = [self.number] if boxed else []
         for arg in self:
-            result += arg._buffers()
+            result += arg.to_buffers()
         return result
 
     @classmethod
@@ -183,34 +184,55 @@ _LongBase = namedtuple('long', 'value')
 _DoubleBase = namedtuple('double', 'value')
 _StringBase = namedtuple('String', 'value')
 
-Int = type('Int', (TLType,), dict(constructors={}))
+class Int(int, TLType):
+    constructors = {}
+
+    def __new__(cls, value):
+        if cls is Int:
+            if isinstance(value, bytes):
+                return cls._from_bytes()
+            if isinstance(value, int):
+                return cls._from_int(value)
+
+        raise ValueError('cannot convert type {} to Int'.format(type(value)))
+
+
 Long = type('Long', (TLType,), dict(constructors={}))
 Double = type('Double', (TLType,), dict(constructors={}))
 String = type('String', (TLType,), dict(constructors={}))
 
-class int_c(_IntBase, TLConstructor):
+class int_c(Int, TLConstructor):
 
     """
     int ? = Int
     """
-
     __slots__ = ()
 
     number = crc32('int ? = Int'.encode()).to_bytes(4, 'little')
-    name='int'
+    name = 'int'
+    _struct = Struct('<i')
 
-    def _buffers(self):
-        return [self.value.to_bytes(4, 'little')]
+    def to_buffers(self):
+        return [self.to_bytes()]
 
-    @staticmethod
-    def from_int(_int):
-        result = int_c.__new__(int_c, _int)
+    def to_bytes(self):
+        return self._struct.pack(self)[0]
+
+    @classmethod
+    def from_bytes(cls, data):
+        value = cls._struct.unpack(data)[0]
+        return int.__new__(cls, value)
+
+    @classmethod
+    def from_int(cls, value):
+        result = int.__new__(cls, value)
+        if result.bit_length() > 32:
+            raise ValueError('value cannot fit into a 32bit integer')
         return result
 
     @classmethod
     def from_stream(cls, stream):
-        return int_c.from_int(int.from_bytes(stream.read(4), byteorder='little'))
-Int.add_constuctor(int_c)
+        return cls.from_bytes(stream.read(4))
 
 class long_c(_LongBase, TLConstructor):
 
@@ -223,7 +245,7 @@ class long_c(_LongBase, TLConstructor):
     number = crc32('long ? = Long'.encode()).to_bytes(4, 'little')
     name = 'long_c'
 
-    def _buffers(self):
+    def to_buffers(self):
         return [self.value.to_bytes(8, 'little')]
 
     @staticmethod
@@ -245,7 +267,7 @@ class vector_c(_VectorBase, TLConstructor):
     def __new__(cls, item_type, num=None, items=None):
         return super().__new__(cls, item_type, num, items)
 
-    def _buffers(self):
+    def to_buffers(self):
         return [item.to_bytes() for item in self.items]
 
     @staticmethod
@@ -273,7 +295,7 @@ class int128_c(_Int128Base, TLConstructor):
     param_types = _Int128Base(int)
     name = 'int128'
 
-    def _buffers(self):
+    def to_buffers(self):
         return [self.value.to_bytes(16, 'little')]
 
     @staticmethod
@@ -294,7 +316,7 @@ class int256_c(_Int128Base, TLConstructor):
     number = crc32('int 4*[ int ] = Int128'.encode()).to_bytes(4, 'little')
     param_types = _Int128Base(int)
 
-    def _buffers(self):
+    def to_buffers(self):
         return [self.value.to_bytes(32, 'little')]
 
     @staticmethod
@@ -336,7 +358,7 @@ class string_c(_StringBase, TLConstructor):
         print(self.pfx_length(), self.value_length(), self.padding_length(), ...)
         return self.pfx_length() + self.value_length() + self.padding_length()
 
-    def _buffers(self):
+    def to_buffers(self):
         return [self.pfx() + self.value + self.padding()]
 
     @classmethod
@@ -706,10 +728,10 @@ msg_detailed_info_c = create_constructor(
 
 class TLFunction(TLCombinator):
 
-    def _buffers(self):
+    def to_buffers(self):
         result = [self.number]
         for arg in self:
-            result += arg._buffers()
+            result += arg.to_buffers()
         return result
 
 
