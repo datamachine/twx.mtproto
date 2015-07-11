@@ -11,6 +11,10 @@ def aes_encrypt(data, auth_key, msg_key):
     aes_key, aes_iv = auth_key.prepare_aes(msg_key)
     return _aes_encrypt(data, aes_key, aes_iv)
 
+def aes_encrypt_local(data, auth_key, msg_key):
+    aes_key, aes_iv = auth_key.prepare_aes(msg_key, False)
+    return _aes_encrypt(data, aes_key, aes_iv)
+
 class MTProtoAuthKey:
 
     def __init__(self):

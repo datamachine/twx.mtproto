@@ -341,8 +341,7 @@ class Datacenter:
         self.socket.write(message)
         self.number += 1
 
-
-    def send_encrypted_message(self, message_data):  # package message, not chat message
+    def send_encrypted_message(self, message_data):
         """
         Ecrypted Message:
             auth_key_id:int64 | msg_key:int128 | encrypted_data:bytes
@@ -352,21 +351,24 @@ class Datacenter:
         """
 
         if self.session_id is None:
-            self.session_id = self.random.getrandbits(64)
+            self.session_id = self.random.getrandbits(64).to_bytes(8, 'little')
 
         salt = self.server_salt
-        session_id = self.session_id.to_bytes(8, 'little')
+        session_id = self.session_id
         message_id = self.generate_message_id().to_bytes(8, 'little')
-        seq_no = self.number.to_bytes(4, 'little')
+        seq_no = int(1).to_bytes(4, 'little')
         message_data_length = len(message_data).to_bytes(4, 'little')
 
         plaintext_message_parts = [
-            salt, session_id, message_id, seq_no, message_data_length
+            salt, session_id, message_id, seq_no, message_data_length, message_data
         ]
 
         plaintext_message_data = b''.join(plaintext_message_parts)
 
-        msg_key = sha_digest = SHA1(plaintext_message_data)[-16:]
+        # Message Key
+        #   The lower-order 128 bits of the SHA1 hash of the part of the message to be encrypted
+        #   (including the internal header and excluding the alignment bytes).
+        msg_key = SHA1(plaintext_message_data)[-16:]
 
         plaintext_message_padding = os.urandom((16 - len(plaintext_message_data) % 16) % 16)
         plaintext_message_data = b''.join([plaintext_message_data, plaintext_message_padding])
@@ -381,9 +383,25 @@ class Datacenter:
             encrypted_data
         ]
 
+        print('auth_key_id:', to_hex(self.auth_key.key_id))
+
         encrypted_message = b''.join(encrypted_message_parts)
 
-        self.socket.write(encrypted_data)
+        tcp_message_parts = [
+            (len(encrypted_message) + 12).to_bytes(4, 'little'),
+            self.number.to_bytes(4, 'little'),
+            encrypted_message,
+        ]
+
+        tcp_message = b''.join(tcp_message_parts)
+
+        tcp_message_crc = crc32(tcp_message).to_bytes(4, 'little')
+
+        tcp_message = b''.join([tcp_message, tcp_message_crc])
+
+        assert len(tcp_message) % 4 == 0
+
+        self.socket.write(tcp_message)
         data = self.socket.read(1024)
         print('recieved_data:', to_hex(data))
 
