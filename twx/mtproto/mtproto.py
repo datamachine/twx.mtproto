@@ -118,6 +118,7 @@ class Datacenter:
         print(getNearestDc)
 
         self.send_encrypted_message(getNearestDc.to_bytes())
+        self.recv_message(True)
         # nearestDc = tl.NearestDc(self.recv_message(True))
         # print(nearestDc)
 
@@ -325,21 +326,8 @@ class Datacenter:
                    struct.pack('<Q', message_id) +  # message_id = generated unique sequencial ID
                    struct.pack('<I', len(message_data)) +  # len of the API call (including message_data exclusively)
                    message_data)  # actual RPC call
-        # stage 2
-        #                                 V------ message generated above
-        #                                          V------- + 12 to include len, msg_number, and checksum (i.e. total paket length)
-        #                                                   V--- gotta increment this shit every fucking packet
-        #                                                               V---- append existing byte string
-        message = struct.pack('<II', len(message)+12, self.number) + message
-        #                   V---- calc chksum of stage 2
-        msg_chksum = crc32(message)
-        # stage 3: append chksum to end
-        message += struct.pack('<I', msg_chksum)
-        # ^-- raw data sent over socket
 
-        # yay!
-        self.socket.write(message)
-        self.number += 1
+        self.send_tcp_message(message)
 
     def send_encrypted_message(self, message_data):
         """
@@ -387,10 +375,13 @@ class Datacenter:
 
         encrypted_message = b''.join(encrypted_message_parts)
 
+        self.send_tcp_message(encrypted_message)
+
+    def send_tcp_message(self, payload):
         tcp_message_parts = [
-            (len(encrypted_message) + 12).to_bytes(4, 'little'),
+            (len(payload) + 12).to_bytes(4, 'little'),
             self.number.to_bytes(4, 'little'),
-            encrypted_message,
+            payload,
         ]
 
         tcp_message = b''.join(tcp_message_parts)
@@ -402,10 +393,6 @@ class Datacenter:
         assert len(tcp_message) % 4 == 0
 
         self.socket.write(tcp_message)
-        data = self.socket.read(1024)
-        print('recieved_data:', to_hex(data))
-
-        raise NotImplementedError()
 
         # yay!
         # self.socket.write(message)
