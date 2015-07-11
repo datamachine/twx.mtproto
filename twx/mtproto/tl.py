@@ -20,6 +20,17 @@ log = logging.getLogger(__name__)
 ---types---
 """
 
+def encoded_combinator_number(data):
+    """
+    converts a string represenation of a combinator into a bytes represenation of its number
+
+    ::
+        # vector#1cb5c415 {t:Type} # [ t ] = Vector t
+        encoded_combinator_number('vector type:t # [ t ] = Vector') -> b'\x15\xc4\xb5\x1c'
+    """
+    if isinstance(data, str):
+        data = data.encode()
+    return crc32(data).to_bytes(4, 'little')
 
 class TLObject(metaclass=ABCMeta):
 
@@ -35,8 +46,6 @@ class TLObject(metaclass=ABCMeta):
     def to_buffers(self):
         """A list of bytes() (one item for each component of the combinator)"""
         raise NotImplementedError()
-
-
 
 
 _VectorBase = namedtuple('Vector', ('t', 'num', 'items'))
@@ -179,8 +188,6 @@ def create_constructor(name, number, params, param_types, result_type):
     result_type.add_constuctor(new_type)
     return new_type
 
-_IntBase = namedtuple('int', 'value')
-_LongBase = namedtuple('long', 'value')
 _DoubleBase = namedtuple('double', 'value')
 _StringBase = namedtuple('String', 'value')
 
@@ -188,16 +195,27 @@ class Int(int, TLType):
     constructors = {}
 
     def __new__(cls, value):
-        if cls is Int:
-            if isinstance(value, bytes):
-                return cls._from_bytes()
-            if isinstance(value, int):
-                return cls._from_int(value)
+        if isinstance(value, bytes):
+            return int_c.from_bytes()
+
+        if isinstance(value, int):
+            return int_c.from_int(value)
 
         raise ValueError('cannot convert type {} to Int'.format(type(value)))
 
+class Long(int, TLType):
+    constructors = {}
 
-Long = type('Long', (TLType,), dict(constructors={}))
+    def __new__(cls, value):
+        if isinstance(value, bytes):
+            return long_c.from_bytes()
+
+        if isinstance(value, int):
+            return long_c.from_int(value)
+
+        raise ValueError('cannot convert type {} to Long'.format(type(value)))
+
+
 Double = type('Double', (TLType,), dict(constructors={}))
 String = type('String', (TLType,), dict(constructors={}))
 
@@ -208,7 +226,7 @@ class int_c(Int, TLConstructor):
     """
     __slots__ = ()
 
-    number = crc32('int ? = Int'.encode()).to_bytes(4, 'little')
+    number = encoded_combinator_number('int ? = Int')
     name = 'int'
     _struct = Struct('<i')
 
@@ -216,7 +234,7 @@ class int_c(Int, TLConstructor):
         return [self.to_bytes()]
 
     def to_bytes(self):
-        return self._struct.pack(self)[0]
+        return self._struct.pack(self)
 
     @classmethod
     def from_bytes(cls, data):
@@ -233,29 +251,41 @@ class int_c(Int, TLConstructor):
     @classmethod
     def from_stream(cls, stream):
         return cls.from_bytes(stream.read(4))
+Int.add_constuctor(int_c)
 
-class long_c(_LongBase, TLConstructor):
+class long_c(Long, TLConstructor):
 
     """
-    int ? = Int
+    long ? = Long
     """
-
     __slots__ = ()
 
-    number = crc32('long ? = Long'.encode()).to_bytes(4, 'little')
-    name = 'long_c'
+    number = encoded_combinator_number('long ? = Long')
+    name = 'long'
+    _struct = Struct('<q')
 
     def to_buffers(self):
-        return [self.value.to_bytes(8, 'little')]
+        print(self.to_bytes(), ...)
+        return [self.to_bytes()]
 
-    @staticmethod
-    def from_int(_int):
-        result = long_c.__new__(long_c, _int)
+    def to_bytes(self):
+        return self._struct.pack(self)
+
+    @classmethod
+    def from_bytes(cls, data):
+        value = cls._struct.unpack(data)[0]
+        return int.__new__(cls, value)
+
+    @classmethod
+    def from_int(cls, value):
+        result = int.__new__(cls, value)
+        if result.bit_length() > 64:
+            raise ValueError('value cannot fit into a 64bit integer')
         return result
 
     @classmethod
     def from_stream(cls, stream):
-        return long_c.from_int(int.from_bytes(stream.read(8), byteorder='little'))
+        return cls.from_bytes(stream.read(8))
 Long.add_constuctor(long_c)
 
 
