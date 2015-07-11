@@ -76,7 +76,9 @@ class MTProtoAuthKey:
 
         auth_key = self._key
 
-        x = 8 if send else 0
+        # TelegramDesktop uses condition "x = 8 if send else 0"
+        # But that seems in contradiction to the statement above
+        x = 0
 
         sha1_a = SHA1(msg_key + substr(auth_key, x, 32))
         sha1_b = SHA1(substr(auth_key, 32+x, 16) + msg_key + substr(auth_key, 48+x, 16))
