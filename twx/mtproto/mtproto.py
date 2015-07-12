@@ -197,7 +197,7 @@ class Datacenter:
         return tmp_aes_key, tmp_aes_iv
 
     def _decrypt_Server_DH_inner_data(self):
-        answer_with_hash = crypt.ige_decrypt(self.server_DH_params.encrypted_answer.value, self.tmp_aes_key, self.tmp_aes_iv)
+        answer_with_hash = crypt.ige_decrypt(self.server_DH_params.encrypted_answer, self.tmp_aes_key, self.tmp_aes_iv)
 
         answer = answer_with_hash[20:]  # decrypted at this point
 

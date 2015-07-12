@@ -188,7 +188,7 @@ def create_constructor(name, number, params, param_types, result_type):
     result_type.add_constuctor(new_type)
     return new_type
 
-class _IntBase(int, TLType):
+class _IntBase(int):
 
     def __new__(cls, value):
         return cls.from_int(value)
@@ -219,7 +219,7 @@ class _IntBase(int, TLType):
         return [self.to_bytes()]
 
 
-class Int(_IntBase):
+class Int(_IntBase, TLType):
     constructors = {}
 
 class int_c(Int, TLConstructor):
@@ -236,7 +236,7 @@ class int_c(Int, TLConstructor):
 Int.add_constuctor(int_c)
 
 
-class Long(_IntBase):
+class Long(_IntBase, TLType):
     constructors = {}
 
 class long_c(Long, TLConstructor):
@@ -316,7 +316,7 @@ class vector_c(_VectorBase, TLConstructor):
 Vector.add_constuctor(vector_c)
 
 
-class Int128(_IntBase):
+class Int128(_IntBase, TLType):
     constructors = {}
 
 class int128_c(Int128, TLConstructor):
@@ -331,7 +331,7 @@ class int128_c(Int128, TLConstructor):
     _byte_length = 16
 Int128.add_constuctor(int128_c)
 
-class Int256(_IntBase):
+class Int256(_IntBase, TLType):
     constructors = {}
 
 class int256_c(Int256, TLConstructor):
@@ -347,16 +347,17 @@ class int256_c(Int256, TLConstructor):
 Int256.add_constuctor(int256_c)
 
 
-_StringBase = namedtuple('String', 'value')
-String = type('String', (TLType,), dict(constructors={}))
+class _StringBase(bytes):
+    def __new__(cls, data):
+        if isinstance(data, str):
+            return cls.from_str(data)
+        elif isinstance(data, bytes):
+            return cls.from_bytes(data)
 
-class string_c(_StringBase, TLConstructor):
-
-    name = 'string'
-    param_types = _StringBase(bytes)
+        raise TypeError('Cannot create String with {}, String can only be created with str or bytes'.format(cls))
 
     def pfx(self):
-        length = len(self.value)
+        length = len(self)
         if length < 254:
             return bytes([length])
         else:
@@ -366,7 +367,7 @@ class string_c(_StringBase, TLConstructor):
         return len(self.pfx())
 
     def value_length(self):
-        return len(self.value)
+        return len(self)
 
     def padding(self):
         return bytes(self.padding_length())
@@ -375,11 +376,24 @@ class string_c(_StringBase, TLConstructor):
         return (4 - ((self.pfx_length() + self.value_length()) % 4)) % 4
 
     def total_length(self):
-        print(self.pfx_length(), self.value_length(), self.padding_length(), ...)
         return self.pfx_length() + self.value_length() + self.padding_length()
 
-    def to_buffers(self):
-        return [self.pfx() + self.value + self.padding()]
+    @classmethod
+    def from_bytes(cls, data):
+        return bytes.__new__(cls, data)
+
+    @classmethod
+    def from_str(cls, string):
+        return cls.from_bytes(string.encode())
+
+    @classmethod
+    def from_int(cls, obj, length=None, byteorder='little'):
+        assert isinstance(obj, int)
+
+        if length is None:
+            length = obj.bit_length() // 8 + 1
+
+        return cls.from_bytes(obj.to_bytes(length, byteorder))
 
     @classmethod
     def from_stream(cls, stream):
@@ -398,27 +412,22 @@ class string_c(_StringBase, TLConstructor):
 
         return string_c.__new__(string_c, str_bytes)
 
-    @staticmethod
-    def from_bytes(obj):
-        assert isinstance(obj, bytes)
-
-        return string_c.__new__(string_c, obj)
-
-    @staticmethod
-    def from_int(obj, length=None, byteorder='little'):
-        assert isinstance(obj, int)
-
-        if length is None:
-            length = obj.bit_length() // 8 + 1
-
-        return string_c.from_bytes(obj.to_bytes(length, byteorder))
+    def to_buffers(self):
+        return [self.pfx() + self + self.padding()]
 
     def to_int(self, byteorder='little'):
-        return int.from_bytes(self.value, byteorder)
+        return int.from_bytes(self, byteorder)
+
+class String(TLType):
+    constructors = {}
+
+class string_c(_StringBase, String, TLConstructor):
+
+    number = encoded_combinator_number('string ? = String')
+    name = 'string'
+String.add_constuctor(string_c)
 
 bytes_c = string_c
-
-
 
 class ResPQ(TLType):
     constructors = {}
