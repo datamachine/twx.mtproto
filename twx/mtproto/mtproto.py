@@ -133,7 +133,7 @@ class Datacenter:
         self.send_plaintext_message(request.to_bytes())
         res_pq = tl.ResPQ.from_stream(self.recv_message())
 
-        assert nonce.value == res_pq.nonce.value
+        assert nonce == res_pq.nonce
 
         return res_pq
 
@@ -153,7 +153,7 @@ class Datacenter:
 
         p_q_inner_data = tl.p_q_inner_data_c(pq=self.resPQ.pq, p=p_string, q=q_string, nonce=self.resPQ.nonce, server_nonce=self.resPQ.server_nonce, new_nonce=new_nonce)
 
-        assert p_q_inner_data.nonce.value == self.resPQ.nonce.value
+        assert p_q_inner_data.nonce == self.resPQ.nonce
 
         return p_q_inner_data
 
@@ -181,7 +181,7 @@ class Datacenter:
         server_DH_params = tl.Server_DH_Params.from_stream(self.recv_message())
 
         assert server_DH_params.number == tl.server_DH_params_ok_c.number, "failed to get params"
-        assert self.resPQ.nonce.value == server_DH_params.nonce.value
+        assert self.resPQ.nonce == server_DH_params.nonce
         assert self.resPQ.server_nonce == server_DH_params.server_nonce
 
         return server_DH_params
@@ -203,8 +203,8 @@ class Datacenter:
 
         server_DH_inner_data = tl.Server_DH_inner_data.from_stream(BytesIO(answer))
 
-        assert self.server_DH_params.nonce.value == server_DH_inner_data.nonce.value
-        assert self.server_DH_params.server_nonce.value == server_DH_inner_data.server_nonce.value
+        assert self.server_DH_params.nonce == server_DH_inner_data.nonce
+        assert self.server_DH_params.server_nonce == server_DH_inner_data.server_nonce
 
         return server_DH_inner_data
 

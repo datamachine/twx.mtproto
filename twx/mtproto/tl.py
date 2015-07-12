@@ -315,54 +315,35 @@ class vector_c(_VectorBase, TLConstructor):
         return vector_c.__new__(vector_c, t, num, items)
 Vector.add_constuctor(vector_c)
 
-"""
-int128 4*[ int ] = Int128
-int256 8*[ int ] = Int256
-"""
-Int128 = type('Int128', (TLType,), dict(constructors={}))
-Int256 = type('Int256', (TLType,), dict(constructors={}))
 
-_Int128Base = namedtuple('Int128', 'value')
-_Int256Base = namedtuple('Int256', 'value')
+class Int128(_IntBase):
+    constructors = {}
 
-class int128_c(_Int128Base, TLConstructor):
+class int128_c(Int128, TLConstructor):
 
-    number = crc32('int 4*[ int ] = Int128'.encode()).to_bytes(4, 'little')
-    param_types = _Int128Base(int)
+    """
+    int128 4*[ int ] = Int128
+    """
+
+    number = encoded_combinator_number('int 4*[ int ] = Int128')
     name = 'int128'
+    _bit_length = 128
+    _byte_length = 16
+Int128.add_constuctor(int128_c)
 
-    def to_buffers(self):
-        return [self.value.to_bytes(16, 'little')]
+class Int256(_IntBase):
+    constructors = {}
 
-    @staticmethod
-    def from_int(_int):
-        result = int128_c.__new__(int128_c, _int)
-        return result
+class int256_c(Int256, TLConstructor):
 
-    @classmethod
-    def from_bytes(cls, obj):
-        return int128_c.from_int(int.from_bytes(obj, byteorder='little'))
+    """
+    int256 8*[ int ] = Int256
+    """
 
-    @classmethod
-    def from_stream(cls, stream, boxed=False):
-        return int128_c.from_int(int.from_bytes(stream.read(16), byteorder='little'))
-
-class int256_c(_Int128Base, TLConstructor):
-
-    number = crc32('int 4*[ int ] = Int128'.encode()).to_bytes(4, 'little')
-    param_types = _Int128Base(int)
-
-    def to_buffers(self):
-        return [self.value.to_bytes(32, 'little')]
-
-    @staticmethod
-    def from_int(_int):
-        result = int128_c.__new__(int128_c, _int)
-        return result
-
-    @classmethod
-    def from_stream(cls, stream, boxed=False):
-        return int128_c.from_int(int.from_bytes(stream.read(32), byteorder='little'))
+    number = encoded_combinator_number('int 8*[ int ] = Int256')
+    name = 'int256'
+    _bit_length = 256
+    _byte_length = 32
 Int256.add_constuctor(int256_c)
 
 
