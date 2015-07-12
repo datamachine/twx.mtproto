@@ -219,10 +219,10 @@ class _IntBase(int, TLType):
         return [self.to_bytes()]
 
 
-class Int(int, TLType):
+class Int(_IntBase):
     constructors = {}
 
-class int_c(_IntBase, TLConstructor):
+class int_c(Int, TLConstructor):
 
     """
     int ? = Int
@@ -236,7 +236,7 @@ class int_c(_IntBase, TLConstructor):
 Int.add_constuctor(int_c)
 
 
-class Long(_IntBase, TLType):
+class Long(_IntBase):
     constructors = {}
 
 class long_c(Long, TLConstructor):
