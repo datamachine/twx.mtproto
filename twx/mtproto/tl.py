@@ -188,18 +188,41 @@ def create_constructor(name, number, params, param_types, result_type):
     result_type.add_constuctor(new_type)
     return new_type
 
+class _IntBase(int, TLType):
+
+    def __new__(cls, value):
+        return cls.from_int(value)
+
+    @classmethod
+    def from_int(cls, value):
+        result = int.__new__(cls, value)
+        if result.bit_length() > cls._bit_length:
+            raise ValueError('{:d} cannot fit into a {}bit Integer'.format(result, cls._bit_length))
+        return result
+
+    @classmethod
+    def from_bytes(cls, data):
+        value = int.from_bytes(data, 'little')
+        return cls.from_int(value)
+
+    @classmethod
+    def from_stream(cls, stream):
+        data = stream.read(cls._byte_length)
+        if len(data) < cls._byte_length:
+            raise StreamReadError('{} requires {:d} bytes, only read {:d}'.format(cls, cls._byte_length, len(data)))
+        return cls.from_bytes(data)
+
+    def to_bytes(self):
+        return int.to_bytes(self, self._byte_length, 'little')
+
+    def to_buffers(self):
+        return [self.to_bytes()]
+
 
 class Int(int, TLType):
     constructors = {}
 
-    def __new__(cls, value):
-        if isinstance(value, bytes):
-            return int_c.from_bytes()
-
-        return int_c.from_int(int(value))
-
-
-class int_c(Int, TLConstructor):
+class int_c(_IntBase, TLConstructor):
 
     """
     int ? = Int
@@ -208,41 +231,13 @@ class int_c(Int, TLConstructor):
 
     number = encoded_combinator_number('int ? = Int')
     name = 'int'
-    _struct = Struct('<i')
-
-    def to_buffers(self):
-        return [self.to_bytes()]
-
-    def to_bytes(self):
-        return self._struct.pack(self)
-
-    @classmethod
-    def from_bytes(cls, data):
-        value = cls._struct.unpack(data)[0]
-        return int.__new__(cls, value)
-
-    @classmethod
-    def from_int(cls, value):
-        result = int.__new__(cls, value)
-        if result.bit_length() > 32:
-            raise ValueError('value cannot fit into a 32bit integer')
-        return result
-
-    @classmethod
-    def from_stream(cls, stream):
-        return cls.from_bytes(stream.read(4))
+    _bit_length = 32
+    _byte_length = 4
 Int.add_constuctor(int_c)
 
 
-class Long(int, TLType):
+class Long(_IntBase, TLType):
     constructors = {}
-
-    def __new__(cls, value):
-        if isinstance(value, bytes):
-            return long_c.from_bytes()
-
-        return long_c.from_int(int(value))
-
 
 class long_c(Long, TLConstructor):
 
@@ -253,29 +248,8 @@ class long_c(Long, TLConstructor):
 
     number = encoded_combinator_number('long ? = Long')
     name = 'long'
-    _struct = Struct('<q')
-
-    def to_buffers(self):
-        return [self.to_bytes()]
-
-    def to_bytes(self):
-        return self._struct.pack(self)
-
-    @classmethod
-    def from_bytes(cls, data):
-        value = cls._struct.unpack(data)[0]
-        return int.__new__(cls, value)
-
-    @classmethod
-    def from_int(cls, value):
-        result = int.__new__(cls, value)
-        if result.bit_length() > 64:
-            raise ValueError('value cannot fit into a 64bit integer')
-        return result
-
-    @classmethod
-    def from_stream(cls, stream):
-        return cls.from_bytes(stream.read(8))
+    _bit_length = 64
+    _byte_length = 8
 Long.add_constuctor(long_c)
 
 

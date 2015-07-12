@@ -1,5 +1,5 @@
-class MTProtoError(Exception):
+class MTProtoKeyNotReadyError(Exception):
     pass
 
-class MTProtoKeyNotReadyError(MTProtoError):
+class StreamReadError(Exception):
     pass
