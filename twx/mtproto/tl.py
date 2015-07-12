@@ -135,21 +135,6 @@ class TLCombinator(TLObject):
     def to_buffers(self):
         raise NotImplementedError()
 
-    @classmethod
-    def verify_arg_types(cls, *args, **kwargs):
-        for arg, param_type in zip(args, cls.param_types):
-            if isinstance(param_type, TLType):
-                if arg.number not in param_type.constructors:
-                    raise TypeError('{}:{} is not a constructor for {}, must be one of {}'.format(arg, arg.number, param_type, param_type.constructors.keys()))
-
-            elif not isinstance(arg, param_type):
-                raise TypeError('{}:{} should be {} in {}'.format(arg, type(arg), param_type, cls))
-
-        for key, arg in kwargs.items():
-            param_type = cls.param_types._asdict()[key]
-            if not isinstance(arg, param_type) and not issubclass(arg, param_type):
-                raise TypeError('{}:{} should be {} in {}'.format(arg, type(arg), param_type, self))
-
 
 class TLConstructor(TLCombinator):
 
@@ -169,7 +154,6 @@ class TLConstructor(TLCombinator):
 
 def create_constructor(name, number, params, param_types, result_type):
     def con__new__(cls, *args, **kwargs):
-        cls.verify_arg_types(*args, **kwargs)
         return super(cls._cls, cls).__new__(cls, *args, **kwargs)
 
     params = namedtuple(name, params)
@@ -222,6 +206,9 @@ class _IntBase(int):
 class Int(_IntBase, TLType):
     constructors = {}
 
+    _bit_length = 32
+    _byte_length = 4
+
 class int_c(Int, TLConstructor):
 
     """
@@ -231,13 +218,14 @@ class int_c(Int, TLConstructor):
 
     number = encoded_combinator_number('int ? = Int')
     name = 'int'
-    _bit_length = 32
-    _byte_length = 4
 Int.add_constuctor(int_c)
 
 
 class Long(_IntBase, TLType):
     constructors = {}
+
+    _bit_length = 64
+    _byte_length = 8
 
 class long_c(Long, TLConstructor):
 
@@ -248,8 +236,6 @@ class long_c(Long, TLConstructor):
 
     number = encoded_combinator_number('long ? = Long')
     name = 'long'
-    _bit_length = 64
-    _byte_length = 8
 Long.add_constuctor(long_c)
 
 
@@ -319,6 +305,9 @@ Vector.add_constuctor(vector_c)
 class Int128(_IntBase, TLType):
     constructors = {}
 
+    _bit_length = 128
+    _byte_length = 16
+
 class int128_c(Int128, TLConstructor):
 
     """
@@ -327,12 +316,14 @@ class int128_c(Int128, TLConstructor):
 
     number = encoded_combinator_number('int 4*[ int ] = Int128')
     name = 'int128'
-    _bit_length = 128
-    _byte_length = 16
 Int128.add_constuctor(int128_c)
+
 
 class Int256(_IntBase, TLType):
     constructors = {}
+
+    _bit_length = 256
+    _byte_length = 32
 
 class int256_c(Int256, TLConstructor):
 
@@ -342,41 +333,38 @@ class int256_c(Int256, TLConstructor):
 
     number = encoded_combinator_number('int 8*[ int ] = Int256')
     name = 'int256'
-    _bit_length = 256
-    _byte_length = 32
 Int256.add_constuctor(int256_c)
 
 
-class _StringBase(bytes):
+class String(bytes, TLType):
+    constructors = {}
+
     def __new__(cls, data):
-        if isinstance(data, str):
-            return cls.from_str(data)
-        elif isinstance(data, bytes):
-            return cls.from_bytes(data)
+        return cls.from_bytes(data)
 
-        raise TypeError('Cannot create String with {}, String can only be created with str or bytes'.format(cls))
+    @classmethod
+    def from_stream(cls, stream):
+        str_len = stream.read(1)[0]
+        count = 1
 
-    def pfx(self):
-        length = len(self)
-        if length < 254:
-            return bytes([length])
-        else:
-            return b''.join([bytes([254]), length.to_bytes(3, 'little')])
+        if str_len == 254:
+            str_len = int.from_bytes(stream.read(3), 'little')
+            count += 3
 
-    def pfx_length(self):
-        return len(self.pfx())
+        data = stream.read(str_len)
+        count += str_len
 
-    def value_length(self):
-        return len(self)
+        # get rid of the padded bytes
+        stream.read((4 - (count % 4)) % 4)
 
-    def padding(self):
-        return bytes(self.padding_length())
+        return cls.from_bytes(data)
 
-    def padding_length(self):
-        return (4 - ((self.pfx_length() + self.value_length()) % 4)) % 4
+    @classmethod
+    def from_int(cls, value, byteorder='little', length=None):
+        if length is None:
+            length = value.bit_length() // 8 + 1
 
-    def total_length(self):
-        return self.pfx_length() + self.value_length() + self.padding_length()
+        return cls.from_bytes(value.to_bytes(length, byteorder))
 
     @classmethod
     def from_bytes(cls, data):
@@ -384,54 +372,36 @@ class _StringBase(bytes):
 
     @classmethod
     def from_str(cls, string):
-        return cls.from_bytes(string.encode())
+        return str.__new__(cls, string, encoding='utf-8')
 
-    @classmethod
-    def from_int(cls, obj, length=None, byteorder='little'):
-        assert isinstance(obj, int)
+    def to_bytes(self):
+        str_len = len(self)
 
-        if length is None:
-            length = obj.bit_length() // 8 + 1
+        pfx = bytes([str_len]) if str_len < 254 else bytes([254]) + str_len.to_bytes(3, 'little')
 
-        return cls.from_bytes(obj.to_bytes(length, byteorder))
+        padding = bytes((4 - (len(pfx) + len(self)) % 4) % 4)
 
-    @classmethod
-    def from_stream(cls, stream):
-        str_len = stream.read(1)[0]
-        count = 1
-
-        if str_len > 253:
-            str_len = int.from_bytes(stream.read(3), 'little', signed=True)
-            count += 3
-
-        str_bytes = stream.read(str_len)
-        count += str_len
-
-        # get rid of the padded bytes
-        stream.read((4 - (count % 4)) % 4)
-
-        return string_c.__new__(string_c, str_bytes)
+        return b''.join([pfx, self, padding])
 
     def to_buffers(self):
-        return [self.pfx() + self + self.padding()]
+        return [self.to_bytes()]
 
     def to_int(self, byteorder='little'):
         return int.from_bytes(self, byteorder)
 
-class String(TLType):
-    constructors = {}
-
-class string_c(_StringBase, String, TLConstructor):
+class string_c(String, TLConstructor):
 
     number = encoded_combinator_number('string ? = String')
     name = 'string'
-String.add_constuctor(string_c)
 
-bytes_c = string_c
+
+class bytes_c(string_c):
+
+    name = 'bytes'
+
 
 class ResPQ(TLType):
     constructors = {}
-
 
 resPQ_c = create_constructor(
     name='resPQ_c', number=0x05162463,

@@ -146,8 +146,8 @@ class Datacenter:
 
         assert p * q == pq and p < q
 
-        p_string = tl.string_c.from_int(p, byteorder='big')
-        q_string = tl.string_c.from_int(q, byteorder='big')
+        p_string = tl.string_c.from_bytes(tl.bytes_c.from_int(p, byteorder='big'))
+        q_string = tl.string_c.from_bytes(tl.bytes_c.from_int(q, byteorder='big'))
 
         new_nonce = tl.int256_c(self.random.getrandbits(256))
 
