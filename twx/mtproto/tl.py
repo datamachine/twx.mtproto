@@ -2,7 +2,7 @@ from abc import ABCMeta, abstractmethod, abstractstaticmethod
 from collections import namedtuple
 from functools import partial
 from enum import Enum
-from collections import OrderedDict
+from collections import OrderedDict, UserList
 from struct import Struct
 
 from . util import to_hex, crc32
@@ -64,6 +64,7 @@ class TLType:
     def from_stream(cls, stream):
         """Boxed type combinator loading"""
         con_num = stream.read(4)
+        print(to_hex(con_num), ...)
         con = cls.constructors.get(con_num)
         if con is None:
             raise ValueError('{} does not have combinator with number {}'.format(cls, to_hex(con_num)))
@@ -79,28 +80,7 @@ class TLType:
 
 
 
-class Vector(TLType):
 
-    constructors = {}
-
-    __slots__ = ('t')
-
-    def __new__(cls, t):
-        result = super(Vector, cls).__new__(cls, allow_new=True)
-        result.t = t
-        return result
-
-    def __init__(self, t):
-        pass
-
-    def from_stream(self, stream):
-        """Boxed type combinator loading"""
-        con_num = stream.read(4)
-        con = self.constructors.get(con_num)
-        if con is None:
-            raise ValueError('{} does not have combinator with number {}'.format(self, to_hex(con_num)))
-
-        return con.from_stream(stream, self.t)
 
 
 _P_Q_inner_dataBase = namedtuple('P_Q_inner_data', ['pq', 'p', 'q', 'nonce', 'server_nonce', 'new_nonce'])
@@ -157,7 +137,7 @@ def create_constructor(name, number, params, param_types, result_type):
         return super(cls._cls, cls).__new__(cls, *args, **kwargs)
 
     params = namedtuple(name, params)
-    class_bases = (params, TLConstructor)
+    class_bases = (params, TLConstructor, result_type,)
     class_body = dict(
         __new__=con__new__,
         name=name,
@@ -281,24 +261,89 @@ class double_c(Double, TLConstructor):
 Double.add_constuctor(double_c)
 
 
-class vector_c(_VectorBase, TLConstructor):
+class Vector(UserList, TLType):
+
+    constructors = {}
+
+    _vector_types = {}
+
+    def __new__(cls, *args, **kwargs):
+        if cls is Vector or cls is vector_c:
+            vector_item_cls = args[0] if args else kwargs.get('vector_item_cls')
+            if not issubclass(vector_item_cls, TLType):
+                raise TypeError('vector_item_cls must be a subclass of TLType')
+            key = (cls, vector_item_cls,)
+            vector_cls = cls._vector_types.get(key)
+            if vector_cls is None:
+                name = '{}_{}'.format(cls.__name__, vector_item_cls.__name__)
+                Vector._vector_types[key] = type(name, (cls,), {'_item_cls_':vector_item_cls})
+                vector_cls = Vector._vector_types.get(key)
+                print('creating new vector type {}'.format(vector_cls))
+            return vector_cls
+        else:
+            return object.__new__(cls)
+
+    def __init__(self, initlist=None):
+        super().__init__(map(self._item_cls_, initlist))
+
+    def insert(self, index, item):
+        return super().insert(index, self._item_cls_(item))
+
+    def append(self, item):
+        return super().append(self._item_cls_(item))
+
+    def extend(self, iterable):
+        return super().extend(map(self._item_cls_, iterable))
+
+    def __setitem__(self, index, item):
+        return super().__setitem__(index, self._item_cls_(item))
+
+    def __add__(self, iterable):
+        return super().__add__(map(self._item_cls_, iterable))
+
+    def __iadd__(self, iterable):
+        return super().__iadd__(map(self._item_cls_, iterable))
+
+    @classmethod
+    def _from_stream(cls, stream):
+        num = int.from_bytes(stream.read(4), 'little')
+        items = []
+        for i in iter(range(num)):
+            items.append(cls._item_cls_.from_stream(stream))
+        return cls(items)
+    
+    @classmethod
+    def from_stream(cls, stream):
+        """Boxed type combinator loading"""
+        con_num = stream.read(4)
+        con = cls.constructors.get(con_num)
+        if con is None:
+            raise ValueError('{} does not have combinator with number {}'.format(cls, to_hex(con_num)))
+
+        return cls._from_stream(stream)
+
+    def _to_bytes(self):
+        count = len(self).to_bytes(4, 'little')
+        items = [i.to_bytes() for i in self.data]
+        return b''.join([count] + items)
+
+    def to_bytes(self, boxed=True):
+        return vector_c.number + self._to_bytes()
+
+class vector_c(Vector, TLConstructor):
 
     number = int(0x1cb5c415).to_bytes(4, 'little')
     name = 'vector'
 
-    def __new__(cls, item_type, num=None, items=None):
-        return super().__new__(cls, item_type, num, items)
-
     def to_buffers(self):
         return [item.to_bytes() for item in self.items]
 
-    @staticmethod
-    def from_stream(stream, t):
-        num = int.from_bytes(stream.read(4), 'little')
-        items = []
-        for i in iter(range(num)):
-            items.append(t.from_stream(stream))
-        return vector_c.__new__(vector_c, t, num, items)
+    @classmethod
+    def from_stream(cls, stream):
+        return cls._from_stream(stream)
+
+    def to_bytes(self):
+        return self._to_bytes()
 Vector.add_constuctor(vector_c)
 
 
@@ -399,15 +444,29 @@ class bytes_c(string_c):
 
     name = 'bytes'
 
-
-class ResPQ(TLType):
+class ResPQ(namedtuple('ResPQ', ['nonce', 'server_nonce', 'pq', 'server_public_key_fingerprints']), TLType):
     constructors = {}
 
-resPQ_c = create_constructor(
-    name='resPQ_c', number=0x05162463,
-    params=['nonce', 'server_nonce', 'pq', 'server_public_key_fingerprints'],
-    param_types=[int128_c, int128_c, bytes_c, Vector(long_c)],
-    result_type=ResPQ)
+class resPQ_c(TLConstructor, ResPQ):
+    """
+    resPQ#05162463 nonce:int128 server_nonce:int128 pq:bytes server_public_key_fingerprints:Vector<long> = ResPQ;
+    """
+    number = b'\x63\x24\x16\x05'
+    name = 'resPQ_c'
+
+    @classmethod
+    def from_stream(cls, stream):
+        return tuple.__new__(cls, [
+            int128_c.from_stream(stream),
+            int128_c.from_stream(stream),
+            bytes_c.from_stream(stream),
+            Vector(long_c).from_stream(stream)
+            ])
+
+ResPQ.add_constuctor(resPQ_c)
+
+    #def from_stream(self, stream):
+    #    nonce 
 
 
 class P_Q_inner_data(TLType):
@@ -421,22 +480,56 @@ p_q_inner_data_c = create_constructor(
     result_type=P_Q_inner_data)
 
 
-class Server_DH_Params(TLType):
+class Server_DH_Params(TLType, namedtuple('Server_DH_Params', 
+    ['nonce', 'server_nonce', 'new_nonce_hash', 'encrypted_answer'])):
     constructors = {}
 
-
-server_DH_params_fail_c = create_constructor(
-    name='server_DH_params_fail_c', number=0x79cb045d,
-    params=['nonce', 'server_nonce', 'new_nonce_hash'],
-    param_types=[int128_c, int128_c, int128_c],
-    result_type=Server_DH_Params)
+    def __new__(cls, nonce, server_nonce, new_nonce_hash, encrypted_answer):
+        raise SyntaxError('Do not call Server_DH_Params directly')
 
 
-server_DH_params_ok_c = create_constructor(
-    name='server_DH_params_ok_c', number=0xd0e8075c,
-    params=['nonce', 'server_nonce', 'encrypted_answer'],
-    param_types=[int128_c, int128_c, bytes_c],
-    result_type=Server_DH_Params)
+class server_DH_params_fail_c(TLConstructor, Server_DH_Params):
+
+    """
+    server_DH_params_fail#79cb045d nonce:int128 server_nonce:int128 new_nonce_hash:int128 = Server_DH_Params;
+    """
+    number = b'\x5dx\04\xcb\x79'
+    name = 'server_DH_params_fail_c'
+
+    def __new__(cls, nonce, server_nonce, new_nonce_hash):
+        return tuple.__new__(cls, [int128_c(nonce), int128_c(server_nonce), int128_c(new_nonce_hash), None])
+
+    @classmethod
+    def from_stream(cls, stream):
+        return tuple.__new__(cls, [
+            int128_c.from_stream(stream),
+            int128_c.from_stream(stream),
+            int128_c.from_stream(stream),
+            None
+            ])
+
+class server_DH_params_ok_c(TLConstructor, Server_DH_Params):
+
+    """
+    server_DH_params_ok#d0e8075c nonce:int128 server_nonce:int128 encrypted_answer:bytes = Server_DH_Params;
+    """
+    number = b'\x5c\x07\xe8\xd0'
+    name = 'server_DH_params_ok_c'
+
+    def __new__(cls, nonce, server_nonce, encrypted_answer):
+        return tuple.__new__(cls, [int128_c(nonce), int128_c(server_nonce), None, bytes_c(encrypted_answer)])
+
+    @classmethod
+    def from_stream(cls, stream):
+        return tuple.__new__(cls, [
+            int128_c.from_stream(stream),
+            int128_c.from_stream(stream),
+            None,
+            bytes_c.from_stream(stream)
+            ])
+
+Server_DH_Params.add_constuctor(server_DH_params_fail_c)
+Server_DH_Params.add_constuctor(server_DH_params_ok_c)
 
 
 class Server_DH_inner_data(TLType):

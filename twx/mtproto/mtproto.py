@@ -117,7 +117,7 @@ class Datacenter:
 
         self.send_encrypted_message(getNearestDc.to_bytes())
         self.recv_message(True)
-        # nearestDc = tl.NearestDc(self.recv_message(True))
+        # nearestDc = tl.NearestDc(self.recv_plaintext_message(True))
         # print(nearestDc)
 
     """
@@ -131,7 +131,7 @@ class Datacenter:
         nonce = tl.int128_c(self.random.getrandbits(128))
         request = tl.req_pq(nonce)
         self.send_plaintext_message(request.to_bytes())
-        res_pq = tl.ResPQ.from_stream(self.recv_message())
+        res_pq = tl.ResPQ.from_stream(BytesIO(self.recv_plaintext_message()))
 
         assert nonce == res_pq.nonce
 
@@ -161,7 +161,7 @@ class Datacenter:
 
         key = RSA.importKey(self.rsa_key.strip())
 
-        public_key_fingerprint = self.resPQ.server_public_key_fingerprints.items[0]
+        public_key_fingerprint = self.resPQ.server_public_key_fingerprints[0]
 
         data = self.p_q_inner_data.to_boxed_bytes()
         sha_digest = SHA1(data)
@@ -178,7 +178,7 @@ class Datacenter:
                                          encrypted_data=encrypted_data)
 
         self.send_plaintext_message(req_DH_params.to_bytes())
-        server_DH_params = tl.Server_DH_Params.from_stream(self.recv_message())
+        server_DH_params = tl.Server_DH_Params.from_stream(BytesIO(self.recv_plaintext_message()))
 
         assert server_DH_params.number == tl.server_DH_params_ok_c.number, "failed to get params"
         assert self.resPQ.nonce == server_DH_params.nonce
@@ -267,7 +267,7 @@ class Datacenter:
                 )
 
             self.send_plaintext_message(set_client_DH_params.to_bytes())
-            self.set_client_DH_params_answer = tl.Set_client_DH_params_answer.from_stream(self.recv_message())
+            self.set_client_DH_params_answer = tl.Set_client_DH_params_answer.from_stream(BytesIO(self.recv_plaintext_message()))
 
             set_client_DH_params_answer = self.set_client_DH_params_answer
 
@@ -327,6 +327,19 @@ class Datacenter:
 
         self.send_tcp_message(message)
 
+    def recv_plaintext_message(self):
+        payload = self.recv_tcp_message()
+
+        auth_key_id = payload[0:8]
+        message_id = payload[8:16]
+        message_data_length = int.from_bytes(payload[16:20], 'little')
+        message_data = payload[20:20+message_data_length]
+
+        if auth_key_id != bytes(8):
+            raise ValueError('did not get a plaintext message')
+
+        return message_data
+
     def send_encrypted_message(self, message_data):
         """
         Ecrypted Message:
@@ -378,27 +391,6 @@ class Datacenter:
 
         sys.exit(1)
 
-    def send_tcp_message(self, payload):
-        tcp_message_parts = [
-            (len(payload) + 12).to_bytes(4, 'little'),
-            self.number.to_bytes(4, 'little'),
-            payload,
-        ]
-
-        tcp_message = b''.join(tcp_message_parts)
-
-        tcp_message_crc = crc32(tcp_message).to_bytes(4, 'little')
-
-        tcp_message = b''.join([tcp_message, tcp_message_crc])
-
-        assert len(tcp_message) % 4 == 0
-
-        self.socket.write(tcp_message)
-
-        # yay!
-        # self.socket.write(message)
-        self.number += 1
-
     def recv_encrypted_message(self):
         payload = self.recv_tcp_message()
 
@@ -445,6 +437,26 @@ class Datacenter:
                                     long -> 00C8A02B 3BBFA055
         """
 
+    def send_tcp_message(self, payload):
+        tcp_message_parts = [
+            (len(payload) + 12).to_bytes(4, 'little'),
+            self.number.to_bytes(4, 'little'),
+            payload,
+        ]
+
+        tcp_message = b''.join(tcp_message_parts)
+
+        tcp_message_crc = crc32(tcp_message).to_bytes(4, 'little')
+
+        tcp_message = b''.join([tcp_message, tcp_message_crc])
+
+        assert len(tcp_message) % 4 == 0
+
+        self.socket.write(tcp_message)
+
+        # yay!
+        # self.socket.write(message)
+        self.number += 1
 
     def recv_tcp_message(self):
 
