@@ -473,49 +473,6 @@ class Datacenter:
 
         return payload
 
-    def recv_message(self, debug=False):
-        """
-        Reading socket and receiving message from server. Check the CRC32.
-        """
-        if debug:
-            packet = self.socket.read(1024)  # reads how many bytes to read
-            print('debug packet:', to_hex(packet))
-
-        packet_length_data = self.socket.read(4)  # total length of the message
-        assert len(packet_length_data) == 4
-
-        packet_length = int.from_bytes(packet_length_data, 'little')
-
-        packet = self.socket.read(packet_length - 4)
-        print('packet:', to_hex(packet_length_data), packet_length, len(packet), to_hex(packet))
-
-        # packet = self.socket.read(packet_length)
-        # packet_io = BytesIO(packet)
-
-        # check the CRC32
-        if crc32(packet_length_data + packet[0:-4]) != struct.unpack('<I', packet[-4:])[0]:
-            raise Exception("CRC32 was not correct!")
-
-        auth_key_id = packet[4:12]
-        # print('auth_key_id:', auth_key_id)
-        if auth_key_id == b'\x00\x00\x00\x00\x00\x00\x00\x00':
-            # No encryption - Plain text
-            (message_id, message_length) = struct.unpack("<QI", packet[12:24])
-            return BytesIO(packet[24:24+message_length])
-        elif auth_key_id == self.auth_key.key_id:
-            message_key = packet[12:28]
-            encrypted_data = packet[28:-4]
-            aes_key, aes_iv = self.aes_calculate(message_key, direction="from server")
-            decrypted_data = crypt.ige_decrypt(encrypted_data, aes_key, aes_iv)
-            assert decrypted_data[0:8] == self.server_salt
-            assert decrypted_data[8:16] == self.session_id
-            # message_id = decrypted_data[16:24]
-            # seq_no = struct.unpack("<I", decrypted_data[24:28])[0]
-            message_data_length = struct.unpack("<I", decrypted_data[28:32])[0]
-            return BytesIO(decrypted_data[32:32+message_data_length])
-
-        raise Exception("Got unknown auth_key id")
-
     def __del__(self):
         # cleanup
         self._socket.close()
