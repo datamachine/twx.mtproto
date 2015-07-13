@@ -116,7 +116,7 @@ class Datacenter:
         print(getNearestDc)
 
         self.send_encrypted_message(getNearestDc.to_bytes())
-        self.recv_message(True)
+        self.recv_encrypted_message()
         # nearestDc = tl.NearestDc(self.recv_plaintext_message(True))
         # print(nearestDc)
 
@@ -146,8 +146,8 @@ class Datacenter:
 
         assert p * q == pq and p < q
 
-        p_string = tl.string_c.from_bytes(tl.bytes_c.from_int(p, byteorder='big'))
-        q_string = tl.string_c.from_bytes(tl.bytes_c.from_int(q, byteorder='big'))
+        p_string = tl.string_c.from_int(p, byteorder='big')
+        q_string = tl.string_c.from_int(q, byteorder='big')
 
         new_nonce = tl.int256_c(self.random.getrandbits(256))
 
@@ -168,7 +168,7 @@ class Datacenter:
         # get padding of random data to fill what is left after data and sha_digest
         random_bytes = os.urandom(255 - len(data) - len(sha_digest))
         to_encrypt = sha_digest + data + random_bytes  # encrypt cat of sha_digest, data, and padding
-        encrypted_data = tl.string_c.from_bytes(key.encrypt(to_encrypt, 0)[0])  # rsa encrypt (key == RSA.key)
+        encrypted_data = tl.string_c(key.encrypt(to_encrypt, 0)[0])  # rsa encrypt (key == RSA.key)
 
         # Presenting proof of work; Server authentication
         req_DH_params = tl.req_DH_params(nonce=self.p_q_inner_data.nonce,
@@ -263,7 +263,7 @@ class Datacenter:
             set_client_DH_params = tl.set_client_DH_params(
                 nonce=self.resPQ.nonce,
                 server_nonce=self.resPQ.server_nonce,
-                encrypted_data=tl.bytes_c.from_bytes(encrypted_data)
+                encrypted_data=tl.bytes_c(encrypted_data)
                 )
 
             self.send_plaintext_message(set_client_DH_params.to_bytes())
@@ -387,9 +387,6 @@ class Datacenter:
         encrypted_message = b''.join(encrypted_message_parts)
 
         self.send_tcp_message(encrypted_message)
-        self.recv_encrypted_message()
-
-        sys.exit(1)
 
     def recv_encrypted_message(self):
         payload = self.recv_tcp_message()
