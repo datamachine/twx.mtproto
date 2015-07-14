@@ -26,6 +26,8 @@ import sys
 import logging
 log = logging.getLogger(__name__)
 
+from collections import namedtuple
+
 class MTProto:
 
     def __init__(self, api_secret, api_id, rsa_key):
@@ -328,7 +330,8 @@ class Datacenter:
         self.send_tcp_message(message)
 
     def recv_plaintext_message(self):
-        payload = self.recv_tcp_message()
+        msg = self.recv_tcp_message()
+        payload = msg.payload
 
         auth_key_id = payload[0:8]
         message_id = payload[8:16]
@@ -389,7 +392,8 @@ class Datacenter:
         self.send_tcp_message(encrypted_message)
 
     def recv_encrypted_message(self):
-        payload = self.recv_tcp_message()
+        tcp_msg = self.recv_tcp_message()
+        payload = tcp_msg.payload
 
         auth_key_id = payload[0:8]
         msg_key = payload[8:24]
@@ -435,45 +439,60 @@ class Datacenter:
         """
 
     def send_tcp_message(self, payload):
-        tcp_message_parts = [
-            (len(payload) + 12).to_bytes(4, 'little'),
-            self.number.to_bytes(4, 'little'),
-            payload,
-        ]
-
-        tcp_message = b''.join(tcp_message_parts)
-
-        tcp_message_crc = crc32(tcp_message).to_bytes(4, 'little')
-
-        tcp_message = b''.join([tcp_message, tcp_message_crc])
-
-        assert len(tcp_message) % 4 == 0
-
-        self.socket.write(tcp_message)
-
-        # yay!
-        # self.socket.write(message)
+        tcp_msg = MTProtoTCPMessage.new(self.number, payload)
+        self.socket.write(tcp_msg)
         self.number += 1
 
     def recv_tcp_message(self):
+        tcp_msg = MTProtoTCPMessage.from_stream(self.socket)
 
-        header = self.socket.read(8)
-        length = int.from_bytes(header[0:4], 'little')
-        tcp_seq_no = int.from_bytes(header[4:], 'little')
-
-        payload = self.socket.read(length - 12)  # length - len(header) - len(payload_crc)
-
-        payload_crc = int.from_bytes(self.socket.read(4), 'little')
-
-        if crc32(header + payload) != payload_crc:
+        if not tcp_msg.crc_ok():
             raise ValueError('payload checksum for tcp does not match')
 
-        return payload
+        return tcp_msg
 
     def __del__(self):
         # cleanup
         self._socket.close()
 
+class MTProtoTCPMessage(bytes):
+    @classmethod
+    def new(cls, seq_no, payload):
+        header_and_payload = bytes().join([
+            int.to_bytes(len(payload) + 12, 4, 'little'),
+            int.to_bytes(seq_no, 4, 'little'),
+            payload
+            ])
+        crc = tl.int_c._to_bytes(crc32(header_and_payload))
+        return bytes.__new__(cls, header_and_payload + crc)
+
+    @classmethod
+    def from_stream(cls, stream):
+        length_bytes = stream.read(4)
+        length = int.from_bytes(length_bytes, 'little')
+
+        return cls(length_bytes + stream.read(length))
+
+    @property
+    def length(self):
+        return int.from_bytes(self[0:4], 'little')
+
+    @property
+    def seq_no(self):
+        return int.from_bytes(self[4:8], 'little')
+
+    @property
+    def payload(self):
+        return self[8:-4]
+
+    @property
+    def crc(self):
+        return int.from_bytes(self[-4:], 'little')
+
+    def crc_ok(self):
+        return self.crc == crc32(self[:-4])
+    
+    
 
 class MTProtoClient:
 

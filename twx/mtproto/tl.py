@@ -55,19 +55,18 @@ class TLType:
     constructors = {}
 
     def __new__(cls, *args, **kwargs):
-        if issubclass(cls, Vector):
-            return super(TLType, cls).__new__(cls)
-
-        raise SyntaxError("Do not use this class directly, call from_stream")
+        raise SyntaxError('TLType is not to be created standalone')
 
     @classmethod
     def from_stream(cls, stream):
         """Boxed type combinator loading"""
         con_num = stream.read(4)
-        print(to_hex(con_num), ...)
         con = cls.constructors.get(con_num)
         if con is None:
-            raise ValueError('{} does not have combinator with number {}'.format(cls, to_hex(con_num)))
+            if cls is TLType:
+                raise ValueError('constructor with number {} does not exists'.format(to_hex(con_num)))
+            else:
+                raise ValueError('{} does not have combinator with number {}'.format(cls, to_hex(con_num)))
 
         return con.from_stream(stream)
 
@@ -75,13 +74,8 @@ class TLType:
     def add_constuctor(cls, constructor_cls):
         if TLType.constructors.get(constructor_cls.number) is not None:
             raise ValueError('duplicate constructor with number: {}'.format(constructor_cls.number))
+        TLType.constructors[constructor_cls.number] = constructor_cls
         cls.constructors[constructor_cls.number] = constructor_cls
-
-
-
-
-
-
 
 _P_Q_inner_dataBase = namedtuple('P_Q_inner_data', ['pq', 'p', 'q', 'nonce', 'server_nonce', 'new_nonce'])
 P_Q_inner_data = type('P_Q_inner_data', (TLType,), dict(constructors={}))
@@ -176,6 +170,10 @@ class _IntBase(int):
             raise StreamReadError('{} requires {:d} bytes, only read {:d}'.format(cls, cls._byte_length, len(data)))
         return cls.from_bytes(data)
 
+    @classmethod
+    def _to_bytes(cls, value):
+        return int.to_bytes(value, cls._byte_length, 'little')
+
     def to_bytes(self):
         return int.to_bytes(self, self._byte_length, 'little')
 
@@ -198,6 +196,7 @@ class int_c(Int, TLConstructor):
 
     number = encoded_combinator_number('int ? = Int')
     name = 'int'
+
 Int.add_constuctor(int_c)
 
 
