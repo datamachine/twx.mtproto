@@ -320,18 +320,13 @@ class Datacenter:
         self.send_tcp_message(msg)
 
     def recv_plaintext_message(self):
-        msg = self.recv_tcp_message()
-        payload = msg.payload
+        tcp_msg = self.recv_tcp_message()
+        msg = MTProtoUnencryptedMessage.from_bytes(tcp_msg.payload)
 
-        auth_key_id = payload[0:8]
-        message_id = payload[8:16]
-        message_data_length = int.from_bytes(payload[16:20], 'little')
-        message_data = payload[20:20+message_data_length]
-
-        if auth_key_id != bytes(8):
+        if msg.is_encrypted():
             raise ValueError('did not get a plaintext message')
 
-        return message_data
+        return msg.message_data
 
     def send_encrypted_message(self, message_data):
         """
@@ -345,41 +340,15 @@ class Datacenter:
         if self.session_id is None:
             self.session_id = self.random.getrandbits(64).to_bytes(8, 'little')
 
-        salt = self.server_salt
-        session_id = self.session_id
-        message_id = self.generate_message_id().to_bytes(8, 'little')
-        seq_no = int(1).to_bytes(4, 'little')
-        message_data_length = len(message_data).to_bytes(4, 'little')
+        msg = MTProtoEncryptedMessage.new(
+                    self.auth_key,
+                    int.from_bytes(self.server_salt, 'little'),
+                    int.from_bytes(self.session_id, 'little'),
+                    self.generate_message_id(),
+                    1,
+                    message_data)
 
-        plaintext_message_parts = [
-            salt, session_id, message_id, seq_no, message_data_length, message_data
-        ]
-
-        plaintext_message_data = b''.join(plaintext_message_parts)
-
-        # Message Key
-        #   The lower-order 128 bits of the SHA1 hash of the part of the message to be encrypted
-        #   (including the internal header and excluding the alignment bytes).
-        msg_key = SHA1(plaintext_message_data)[-16:]
-
-        plaintext_message_padding = os.urandom((16 - len(plaintext_message_data) % 16) % 16)
-        plaintext_message_data = b''.join([plaintext_message_data, plaintext_message_padding])
-
-        assert len(plaintext_message_data) % 16 == 0
-
-        encrypted_data = aes_encrypt(plaintext_message_data, self.auth_key, msg_key)
-
-        encrypted_message_parts = [
-            self.auth_key.key_id,
-            msg_key,
-            encrypted_data
-        ]
-
-        print('auth_key_id:', to_hex(self.auth_key.key_id))
-
-        encrypted_message = b''.join(encrypted_message_parts)
-
-        self.send_tcp_message(encrypted_message)
+        self.send_tcp_message(msg)
 
     def recv_encrypted_message(self):
         tcp_msg = self.recv_tcp_message()
@@ -428,16 +397,16 @@ class Datacenter:
                                     long -> 00C8A02B 3BBFA055
         """
 
-    def send_tcp_message(self, payload):
-        tcp_msg = MTProtoTCPMessage.new(self.number, payload)
-        self.socket.write(tcp_msg)
+    def send_tcp_message(self, mproto_message):
+        tcp_msg = MTProtoTCPMessage.new(self.number, mproto_message)
+        self.socket.write(tcp_msg.to_bytes())
         self.number += 1
 
     def recv_tcp_message(self):
         tcp_msg = MTProtoTCPMessage.from_stream(self.socket)
 
         if not tcp_msg.crc_ok():
-            raise ValueError('payload checksum for tcp does not match')
+            raise ValueError('mproto_message checksum for tcp does not match')
 
         return tcp_msg
 
@@ -445,31 +414,105 @@ class Datacenter:
         # cleanup
         self._socket.close()
 
+class MTProtoMessage:
 
-class MTProtoUnencryptedMessage(bytes):
+    @classmethod
+    def from_tcp_msg(cls, tcp_msg):
+        if cls is MTProtoMessage:
+            if tcp_msg.payload[0:8] == b'\x00\x00\x00\x00\x00\x00\x00\x00':
+                return MTProtoUnencryptedMessage(tcp_msg.payload)
+            else:
+                return MTProtoEncryptedMessage(tcp_msg.payload)
+        else:
+            return cls(tcp_msg)
+
+    def is_encrypted(self):
+        return self.auth_key_id != 0
+    
+
+class MTProtoEncryptedMessage(MTProtoMessage,
+    namedtuple('MTProtoEncryptedMessage', 'auth_key_id msg_key encrypted_data encrypted_data_bytes')):
+
+    """
+    Ecrypted Message:
+        auth_key_id:int64 | msg_key:int128 | encrypted_data:bytes
+    """
+
+    class EncryptedData(namedtuple('EncryptedData', 'salt session_id message_id seq_no message_data_length message_data')):
+        """
+        Encrypted Message: encrypted_data
+            salt:int64 | session_id:int64 | message_id:int64 | seq_no:int32 | message_data_length:int32 | message_data:bytes | padding 0..15:bytes
+        """
+
+        _header_struct = Struct('<QQQII')
+
+        @classmethod
+        def new(cls, salt, session_id, message_id, seq_no, message_data):
+            return cls(salt, session_id, message_id, seq_no, len(message_data), message_data)
+
+        def encrypt(self, auth_key):
+            unencryped_data = self._header_struct.pack(self.salt, self.session_id, self.message_id, self.seq_no, self.message_data_length) + self.message_data
+            msg_key = SHA1(unencryped_data)[-16:]
+
+            padding = os.urandom((16 - len(unencryped_data) % 16) % 16)
+            unencryped_data += padding
+
+            assert len(unencryped_data) % 16 == 0
+
+            encrypted_data = aes_encrypt(unencryped_data, auth_key, msg_key)
+
+            return (msg_key, encrypted_data,)
+
+
+    @classmethod
+    def new(cls, auth_key, salt, session_id, message_id, seq_no, message_data):
+        encrypted_data = cls.EncryptedData.new(salt, session_id, message_id, seq_no, message_data)
+        msg_key, encrypted_data_bytes = encrypted_data.encrypt(auth_key)
+        return cls(auth_key.key_id, msg_key, encrypted_data, encrypted_data_bytes)
+
+    def to_bytes(self):
+        return b''.join((self.auth_key_id, self.msg_key, self.encrypted_data_bytes,))
+
+
+class MTProtoUnencryptedMessage(MTProtoMessage,
+    namedtuple('MTProtoUnencryptedMessage', 'auth_key_id message_id message_data_length message_data')):
 
     """
     Unencrypted Message:
         auth_key_id = 0:int64   message_id:int64   message_data_length:int32   message_data:bytes
     """
+
     _header_struct = Struct('<QQI')
 
     @classmethod
     def new(cls, message_id, message_data):
-        return bytes.__new__(cls, cls._header_struct.pack(0, message_id, len(message_data)) + message_data)
-    
+        return cls.__new__(cls, 0, message_id, len(message_data), message_data)
 
-class MTProtoTCPMessage(bytes):
+        result = cls.__new__(cls)
+        result.data = cls._header_struct.pack(0, message_id, len(message_data)) + message_data
+        return result
 
     @classmethod
-    def new(cls, seq_no, payload):
+    def from_bytes(cls, data):
+        auth_key_id, message_id, message_data_length = cls._header_struct.unpack(data[0:20])
+        return cls(auth_key_id, message_id, message_data_length, data[20:])
+
+    def to_bytes(self):
+        return self._header_struct.pack(self.auth_key_id, self.message_id, self.message_data_length) + self.message_data
+
+class MTProtoTCPMessage(namedtuple('MTProtoTCPMessage', 'data')):
+
+    @classmethod
+    def new(cls, seq_no, mtproto_msg):
+        payload = mtproto_msg.to_bytes()
         header_and_payload = bytes().join([
             int.to_bytes(len(payload) + 12, 4, 'little'),
             int.to_bytes(seq_no, 4, 'little'),
             payload
             ])
         crc = tl.int_c._to_bytes(crc32(header_and_payload))
-        return bytes.__new__(cls, header_and_payload + crc)
+
+        return cls(header_and_payload + crc)
 
     @classmethod
     def from_stream(cls, stream):
@@ -480,22 +523,25 @@ class MTProtoTCPMessage(bytes):
 
     @property
     def length(self):
-        return int.from_bytes(self[0:4], 'little')
+        return int.from_bytes(self.data[0:4], 'little')
 
     @property
     def seq_no(self):
-        return int.from_bytes(self[4:8], 'little')
+        return int.from_bytes(self.data[4:8], 'little')
 
     @property
     def payload(self):
-        return self[8:-4]
+        return self.data[8:-4]
 
     @property
     def crc(self):
-        return int.from_bytes(self[-4:], 'little')
+        return int.from_bytes(self.data[-4:], 'little')
 
     def crc_ok(self):
-        return self.crc == crc32(self[:-4])
+        return self.crc == crc32(self.data[:-4])
+
+    def to_bytes(self):
+        return self.data
 
 
 class MTProtoClient:
