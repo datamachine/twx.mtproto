@@ -352,23 +352,11 @@ class Datacenter:
 
     def recv_encrypted_message(self):
         tcp_msg = self.recv_tcp_message()
-        payload = tcp_msg.payload
 
-        auth_key_id = payload[0:8]
-        msg_key = payload[8:24]
-        encrypted_data = payload[24:]
+        msg = MTProtoEncryptedMessage.from_bytes(tcp_msg.payload)
+        msg = msg.decrypt(self.auth_key)
 
-        plaintext_message = aes_decrypt(encrypted_data, self.auth_key, msg_key)
-
-        salt = plaintext_message[0:8]
-        session_id = plaintext_message[8:16]
-        message_id = plaintext_message[16:24]
-        seq_no = plaintext_message[24:28]
-        message_data_length = plaintext_message[28:32]
-        message_data_length = int.from_bytes(message_data_length, 'little')
-        message_data = plaintext_message[32:32+message_data_length]
-
-        print('message_data:', to_hex(message_data))
+        print('message_data:', to_hex(msg.encrypted_data.message_data))
 
         """
         at this point, message_data looks a lot like this:
@@ -430,8 +418,7 @@ class MTProtoMessage:
         return self.auth_key_id != 0
     
 
-class MTProtoEncryptedMessage(MTProtoMessage,
-    namedtuple('MTProtoEncryptedMessage', 'auth_key_id msg_key encrypted_data encrypted_data_bytes')):
+class MTProtoEncryptedMessage(namedtuple('MTProtoEncryptedMessage', 'auth_key_id msg_key encrypted_data encrypted_data_bytes'), MTProtoMessage):
 
     """
     Ecrypted Message:
@@ -463,12 +450,29 @@ class MTProtoEncryptedMessage(MTProtoMessage,
 
             return (msg_key, encrypted_data,)
 
+        @classmethod
+        def from_bytes(cls, data):
+            parts = list(cls._header_struct.unpack(data[0:32]))
+            parts.append(data[32:32+parts[-1]])
+            return cls(*parts)
+
+        @classmethod
+        def decrypt(cls, auth_key, msg_key, data):
+            plaintext_message = aes_decrypt(data, auth_key, msg_key)
+            return cls.from_bytes(plaintext_message)
 
     @classmethod
     def new(cls, auth_key, salt, session_id, message_id, seq_no, message_data):
         encrypted_data = cls.EncryptedData.new(salt, session_id, message_id, seq_no, message_data)
         msg_key, encrypted_data_bytes = encrypted_data.encrypt(auth_key)
         return cls(auth_key.key_id, msg_key, encrypted_data, encrypted_data_bytes)
+    
+    def decrypt(self, auth_key):
+        return self._replace(encrypted_data=self.EncryptedData.decrypt(auth_key, self.msg_key, self.encrypted_data_bytes))
+
+    @classmethod
+    def from_bytes(cls, data):
+        return cls(data[0:8], data[8:24], None, data[24:])
 
     def to_bytes(self):
         return b''.join((self.auth_key_id, self.msg_key, self.encrypted_data_bytes,))
