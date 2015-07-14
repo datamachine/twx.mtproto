@@ -27,6 +27,7 @@ import logging
 log = logging.getLogger(__name__)
 
 from collections import namedtuple
+from struct import Struct
 
 class MTProto:
 
@@ -315,19 +316,8 @@ class Datacenter:
         return msg_id
 
     def send_plaintext_message(self, message_data):  # package message, not chat message
-        """
-        Unencrypted Message:
-            auth_key_id = 0:int64   message_id:int64   message_data_length:int32   message_data:bytes
-        """
-        # stage 1
-        # first one (e.g. req_PQ) message_data == constructor + 16 bytes
-        message_id = self.generate_message_id()
-        message = (bytes(8) +  # 8 nulls means unencrypted
-                   struct.pack('<Q', message_id) +  # message_id = generated unique sequencial ID
-                   struct.pack('<I', len(message_data)) +  # len of the API call (including message_data exclusively)
-                   message_data)  # actual RPC call
-
-        self.send_tcp_message(message)
+        msg = MTProtoUnencryptedMessage.new(self.generate_message_id(), message_data)
+        self.send_tcp_message(msg)
 
     def recv_plaintext_message(self):
         msg = self.recv_tcp_message()
@@ -455,7 +445,22 @@ class Datacenter:
         # cleanup
         self._socket.close()
 
+
+class MTProtoUnencryptedMessage(bytes):
+
+    """
+    Unencrypted Message:
+        auth_key_id = 0:int64   message_id:int64   message_data_length:int32   message_data:bytes
+    """
+    _header_struct = Struct('<QQI')
+
+    @classmethod
+    def new(cls, message_id, message_data):
+        return bytes.__new__(cls, cls._header_struct.pack(0, message_id, len(message_data)) + message_data)
+    
+
 class MTProtoTCPMessage(bytes):
+
     @classmethod
     def new(cls, seq_no, payload):
         header_and_payload = bytes().join([
@@ -491,8 +496,7 @@ class MTProtoTCPMessage(bytes):
 
     def crc_ok(self):
         return self.crc == crc32(self[:-4])
-    
-    
+
 
 class MTProtoClient:
 
