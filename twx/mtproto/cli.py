@@ -205,7 +205,7 @@ class CursesCLI(CLIApp):
                 print(e)
             except KeyboardInterrupt as e:
                 reset_stdio()
-                sys.exit()
+                return
 
     def _wrapped_run(self, stdscr):
         self.stdscr = stdscr
