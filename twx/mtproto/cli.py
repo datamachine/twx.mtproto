@@ -205,7 +205,7 @@ class CursesCLI(CLIApp):
                 print(e)
             except KeyboardInterrupt as e:
                 reset_stdio()
-                raise e
+                sys.exit()
 
     def _wrapped_run(self, stdscr):
         self.stdscr = stdscr
@@ -217,10 +217,7 @@ class CursesCLI(CLIApp):
     def run(self):
         locale.setlocale(locale.LC_ALL, '')
 
-        try:
-            curses.wrapper(self._wrapped_run)
-        except KeyboardInterrupt as e:
-            pass
+        curses.wrapper(self._wrapped_run)
 
 def main():
     cli = CursesCLI()
