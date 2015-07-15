@@ -436,7 +436,7 @@ class MTProtoEncryptedMessage(namedtuple('MTProtoEncryptedMessage',
         def new(cls, salt, session_id, message_id, seq_no, message_data):
             return cls(salt, session_id, message_id, seq_no, len(message_data), message_data)
 
-        def padding_bytes(self):
+        def generate_padding(self):
             return os.urandom((16 - (32 + len(self.message_data)) % 16) % 16)
 
         def to_bytes(self):
@@ -458,7 +458,7 @@ class MTProtoEncryptedMessage(namedtuple('MTProtoEncryptedMessage',
     def encrypt(self, auth_key):
         unencryped_data = self.encrypted_data.to_bytes()
         msg_key = SHA1(unencryped_data)[-16:]
-        unencryped_data += self.encrypted_data.padding_bytes()
+        unencryped_data += self.encrypted_data.generate_padding()
 
         assert len(unencryped_data) % 16 == 0
 
