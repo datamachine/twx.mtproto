@@ -22,9 +22,8 @@ import locale
 import curses
 from functools import partial
 from io import StringIO, StringIO
+from datetime import datetime
 
-locale.setlocale(locale.LC_ALL, '')
-code = locale.getpreferredencoding()
 
 def save_stdio_state(func):
     sys_stdout = sys.stdout
@@ -54,21 +53,25 @@ class _Stdio:
         self.attrs = attrs
 
     def write(self, string):
+        if string != '\n':
+            string = '{}: {}'.format(datetime.now().strftime('%X.%f'), string)
         self.output_win.addstr(string, *self.attrs)
         self.flush()
 
     def flush(self):
         self.output_win.refresh()
 
-class CLI:
+class CLIApp:
 
-    def __init__(self, config):
-        self.config = config
-        self.client = mtproto.MTProtoClient(config)
+    def __init__(self):
+        self.config = None
+        self.client = None
         self.arg_parser = argparse.ArgumentParser(prog='')
         self._init_commands()
 
-        self.stdscr = None  # for curses
+    def create_client(config):
+        self.config = config
+        self.client = mtproto.MTProtoClient(config)
 
     def _init_commands(self):
         subparsers = self.arg_parser.add_subparsers(title='commands', prog='', metavar='', help='')
@@ -92,7 +95,10 @@ class CLI:
             print(i, text)
 
     def cmd_init(self):
-        self.client.init_connection()
+        if self.client is not None:
+            self.client.init_connection()
+        else:
+            print('MTProto client has not yet been created', file=sys.stderr)
 
     def cmd_quit(self):
         self.loop.stop()
@@ -110,90 +116,115 @@ class CLI:
 
         func(**kwargs)
 
-@asyncio.coroutine
-def _curses_refresh(stdscr):
 
-    height, width = stdscr.getmaxyx()
+class CursesCLI(CLIApp):
 
-    output_win = stdscr.subwin(height-2, width, 0, 0)
+    def __init__(self):
+        super().__init__()
+        self.stdscr = None
 
-    output_win.idlok(1)
-    output_win.scrollok(1)
+    @asyncio.coroutine
+    def _curses_refresh(self):
 
-    y, x = output_win.getmaxyx()
-    output_win.move(y-1, 0)
+        height, width = self.stdscr.getmaxyx()
 
-    separator_win = stdscr.subwin(1, x, y, 0)
-    separator_win.hline(0, 0, '-', x)
-    separator_win.refresh()
-    
-    ps1_text = 'twx.mtproto: '
-    ps1_win = stdscr.subwin(1, len(ps1_text)+1, height-1, 0)
-    ps1_win.addstr(ps1_text)
-    ps1_win.refresh()
+        output_win = self.stdscr.subwin(height-2, width, 0, 0)
 
-    cmd_win = stdscr.subwin(1, width - len(ps1_text)-1, height-1, len(ps1_text))
+        output_win.idlok(1)
+        output_win.scrollok(1)
 
-    curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_RED)
+        y, x = output_win.getmaxyx()
+        output_win.move(y-1, 0)
 
-    stdout = _Stdio(output_win)
-    stderr = _Stdio(output_win, curses.color_pair(1))
+        separator_win = self.stdscr.subwin(1, x, y, 0)
+        separator_win.hline(0, 0, '-', x)
+        separator_win.refresh()
+        
+        ps1_text = 'twx.mtproto: '
+        ps1_win = self.stdscr.subwin(1, len(ps1_text)+1, height-1, 0)
+        ps1_win.addstr(ps1_text)
+        ps1_win.refresh()
 
-    set_stdio(stdout, stderr)
+        cmd_win = self.stdscr.subwin(1, width - len(ps1_text)-1, height-1, len(ps1_text))
+        cmd_win.move(0,0)
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--config', type=argparse.FileType(), default='mtproto.conf')
-    args = parser.parse_args()
+        curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_RED)
 
-    config = ConfigParser()
-    config.read_file(args.config)
+        stdout = _Stdio(output_win)
+        stderr = _Stdio(output_win, curses.color_pair(1))
 
-    cli = CLI(config)
+        set_stdio(stdout, stderr)
 
-    buf = StringIO()
-    while True:
-        try:
-            key = cmd_win.getkey()
-            if key == '\n':
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--config', type=argparse.FileType(), default='mtproto.conf')
+        args = parser.parse_args()
+
+        config = ConfigParser()
+        config.read_file(args.config)
+
+        buf = StringIO()
+        cmd_curs = [0, 0]
+        while True:
+            try:
+                key = cmd_win.getkey()
+                if key == '\n':
+                    buf.seek(0)
+                    text = buf.read()
+                    if text.strip():
+                        output_win.addstr('\ncmd: {}\n'.format(text))
+                        output_win.refresh()
+                    buf.seek(0)
+                    string = buf.read()
+                    buf.truncate(0)
+
+                    self.process_input(string)
+
+                    cmd_win.clear()
+                elif key == '\x7f':
+                    pos = buf.tell()
+                    buf.truncate(pos-1)
+                elif key == '\x15':
+                    string = buf.read()
+                    buf.truncate(0)
+                    buf.write(string)
+                elif key.isprintable():
+                    buf.write(key)
+                else:
+                    print('unhandled key \'{}\''.format(repr(key)))
+
+                pos = buf.tell()
                 buf.seek(0)
-                text = buf.read()
-                if text.strip():
-                    output_win.addstr('\ncmd: {}\n'.format(text))
-                    output_win.refresh()
-                buf.seek(0)
-                string = buf.read()
-                buf.truncate(0)
-
-                cli.process_input(string)
-
+                cmd_line = buf.read()
                 cmd_win.clear()
-            elif key.isprintable():
-                buf.write(key)
-            else:
-                output_win.addstr('\n')
-                output_win.addstr(repr(key))
+                cmd_win.addstr(cmd_line)
+                cmd_win.move(0, len(cmd_line))
 
-            buf.seek(0)
-            cmd_win.clear()
-            cmd_win.addstr(buf.read())
+                cmd_win.refresh()
+                output_win.refresh()
+            except Exception as e:
+                print(e)
+            except KeyboardInterrupt as e:
+                reset_stdio()
+                raise e
 
-            cmd_win.refresh()
-            output_win.refresh()
-        except Exception as e:
-            print(e)
+    def _wrapped_run(self, stdscr):
+        self.stdscr = stdscr
+
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(self._curses_refresh())
+        loop.close()
+
+    def run(self):
+        locale.setlocale(locale.LC_ALL, '')
+
+        try:
+            curses.wrapper(self._wrapped_run)
         except KeyboardInterrupt as e:
-            reset_stdio()
-            raise e
-
-def run_curses(stdscr):
-    stdscr = stdscr
-
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(_curses_refresh(stdscr))
-    loop.close()
+            pass
 
 def main():
-    curses.wrapper(run_curses)
+    cli = CursesCLI()
+    cli.run()
 
 if __name__ == "__main__":
     main()
