@@ -52,8 +52,8 @@ class _Stdio:
         self.output_win = output_win
         self.attrs = attrs
 
-    def write(self, string):
-        if string != '\n':
+    def write(self, string, ts=False):
+        if ts:
             string = '{}: {}'.format(datetime.now().strftime('%X.%f'), string)
         self.output_win.addstr(string, *self.attrs)
         self.flush()
@@ -66,6 +66,8 @@ class CLIApp:
     def __init__(self):
         self.config = None
         self.client = None
+        self.exit_code = 0
+        self.ps1_text = 'twx.mtproto# '
         self.arg_parser = argparse.ArgumentParser(prog='')
         self._init_commands()
 
@@ -122,13 +124,81 @@ class CursesCLI(CLIApp):
     def __init__(self):
         super().__init__()
         self.stdscr = None
+        self.root_win = None
+        self.command_history = []
+        self.command_history_idx = 0
+        self.command_history_buf = []
+
+    def do_resize(self, output_win, separator_win, ps1_win, cmd_win):
+        height, width = self.stdscr.getmaxyx()
+        
+        self.stdscr.clear()
+        self.root_win.clear()
+
+        curses.resizeterm(height, width)
+        self.root_win.resize(height, width)
+
+        output_win.mvwin(0, 0)
+        output_win.resize(height-2, width)
+
+        separator_win.mvwin(height-2, 0)
+        separator_win.resize(1, width)
+        separator_win.hline(0, 0, '-', width)
+
+        cmd_win.clear()
+
+        #separator_win.move(height-2, 0)
+        #separator_win.hline(0, 0, '-', width)
+
+        self.stdscr.refresh()
+        self.root_win.refresh()
+        output_win.refresh()
+        separator_win.refresh()
+        ps1_win.refresh()
+        cmd_win.refresh()
+
+    def add_cmd_history(self, buf):
+        if 0 <= self.command_history_idx < len(self.command_history):
+            if buf == self.command_history[self.command_history_idx]:
+                self.command_history_idx = len(self.command_history)
+                return
+
+        self.command_history.append(buf)
+        self.command_history_idx = len(self.command_history)
+
+    def prev_cmd_history(self, buf):
+        if len(self.command_history) <= self.command_history_idx:
+            self.command_history_buf = buf
+            self.command_history_idx = len(self.command_history)
+
+        self.command_history_idx -= 1
+        if self.command_history_idx < 0:
+            self.command_history_idx = 0
+        return list(self.command_history[self.command_history_idx])
+
+    def next_cmd_history(self, buf):
+        self.command_history_idx += 1
+        if self.command_history_idx == len(self.command_history):
+            result = self.command_history_buf
+            self.command_history_buf = []
+            return result
+
+        if self.command_history_idx > len(self.command_history):
+            self.command_history_idx = len(self.command_history)
+            return buf
+
+        if 0 <= self.command_history_idx < len(self.command_history):
+            return list(self.command_history[self.command_history_idx])
+
+        return []
 
     @asyncio.coroutine
     def _curses_refresh(self):
-
         height, width = self.stdscr.getmaxyx()
 
-        output_win = self.stdscr.subwin(height-2, width, 0, 0)
+        self.root_win = self.stdscr.subwin(height, width, 0, 0)
+
+        output_win = self.root_win.subwin(height-2, width, 0, 0)
 
         output_win.idlok(1)
         output_win.scrollok(1)
@@ -136,17 +206,18 @@ class CursesCLI(CLIApp):
         y, x = output_win.getmaxyx()
         output_win.move(y-1, 0)
 
-        separator_win = self.stdscr.subwin(1, x, y, 0)
+        separator_win = self.root_win.subwin(1, x, y, 0)
         separator_win.hline(0, 0, '-', x)
         separator_win.refresh()
         
-        ps1_text = 'twx.mtproto: '
-        ps1_win = self.stdscr.subwin(1, len(ps1_text)+1, height-1, 0)
+        ps1_text = self.ps1_text
+        ps1_win = self.root_win.subwin(1, len(ps1_text)+1, height-1, 0)
         ps1_win.addstr(ps1_text)
         ps1_win.refresh()
 
-        cmd_win = self.stdscr.subwin(1, width - len(ps1_text)-1, height-1, len(ps1_text))
+        cmd_win = self.root_win.subwin(1, width - len(ps1_text)-1, height-1, len(ps1_text))
         cmd_win.move(0,0)
+        cmd_win.keypad(1)
 
         curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_RED)
 
@@ -162,62 +233,88 @@ class CursesCLI(CLIApp):
         config = ConfigParser()
         config.read_file(args.config)
 
-        buf = StringIO()
-        cmd_curs = [0, 0]
+        buf = list()
+
+
         while True:
             try:
                 key = cmd_win.getkey()
                 if key == '\n':
-                    buf.seek(0)
-                    text = buf.read()
-                    if text.strip():
-                        output_win.addstr('\ncmd: {}\n'.format(text))
+                    string = ''.join(buf).strip()
+                    
+                    if string.strip():
+                        self.add_cmd_history(buf)
+                        print(self.command_history)
+
+                        output_win.addstr('{}\n'.format(string))
                         output_win.refresh()
-                    buf.seek(0)
-                    string = buf.read()
-                    buf.truncate(0)
+                    else:
+                        output_win.addstr('\n')
+                        output_win.refresh()
 
-                    self.process_input(string)
-
+                    buf = list()
                     cmd_win.clear()
+                    self.process_input(string)
                 elif key == '\x7f':
-                    pos = buf.tell()
-                    buf.truncate(pos-1)
+                    cy, cx = cmd_win.getyx()
+                    if 0 < cx <= len(buf):
+                        del buf[cx-1]
+                        cmd_win.move(cy, cx-1)
                 elif key == '\x15':
-                    string = buf.read()
-                    buf.truncate(0)
-                    buf.write(string)
-                elif key.isprintable():
-                    buf.write(key)
+                    cy, cx = cmd_win.getyx()
+                    if 0 < cx:
+                        if cx < len(buf):
+                            del buf[0:cx]
+                        else:
+                            buf = list()
+                        cmd_win.move(0, 0)
+                elif key == 'KEY_LEFT':
+                    cy, cx = cmd_win.getyx()
+                    if 0 < cx:
+                        cmd_win.move(cy, cx-1)
+                elif key == 'KEY_RIGHT':
+                    cy, cx = cmd_win.getyx()
+                    if cx < 255:
+                        cmd_win.move(cy, cx+1)
+                elif key == 'KEY_UP':
+                    buf = self.prev_cmd_history(buf)
+                elif key == 'KEY_DOWN':
+                    buf = self.next_cmd_history(buf)
+                elif key == 'KEY_RESIZE':
+                    self.do_resize(output_win, separator_win, ps1_win, cmd_win)
+                elif len(key) == 1 and key.isprintable():
+                    cy, cx = cmd_win.getyx()
+                    if 0 <= cx < 255 and len(buf) < 255:
+                        buf.insert(cx, key)
+                        cmd_win.move(cy, cx+1)
                 else:
-                    print('unhandled key \'{}\''.format(repr(key)))
+                    print('unhandled key: \'{}\''.format(repr(key)))
 
-                pos = buf.tell()
-                buf.seek(0)
-                cmd_line = buf.read()
+                cy, cx = cmd_win.getyx()
                 cmd_win.clear()
-                cmd_win.addstr(cmd_line)
-                cmd_win.move(0, len(cmd_line))
-
                 cmd_win.refresh()
+
+                cmd_win.addstr(''.join(buf))
+                cmd_win.move(cy, cx)
                 output_win.refresh()
+                cmd_win.refresh()
             except Exception as e:
                 print(e)
             except KeyboardInterrupt as e:
                 reset_stdio()
-                return
+                return 130
 
     def _wrapped_run(self, stdscr):
         self.stdscr = stdscr
 
         loop = asyncio.get_event_loop()
-        loop.run_until_complete(self._curses_refresh())
+        self.exit_code = loop.run_until_complete(self._curses_refresh())
         loop.close()
 
     def run(self):
         locale.setlocale(locale.LC_ALL, '')
-
         curses.wrapper(self._wrapped_run)
+        sys.exit(self.exit_code)
 
 def main():
     cli = CursesCLI()
