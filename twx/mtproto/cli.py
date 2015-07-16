@@ -329,12 +329,12 @@ class CursesCLI:
 
         loop = asyncio.get_event_loop()
         self.exit_code = loop.run_until_complete(self._curses_refresh())
-        reset_stdio()
         loop.close()
 
     def run(self):
         locale.setlocale(locale.LC_ALL, '')
         curses.wrapper(self._wrapped_run)
+        reset_stdio()
         sys.exit(self.exit_code)
 
 def main():
