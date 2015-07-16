@@ -71,7 +71,7 @@ class CLIApp:
         self.arg_parser = argparse.ArgumentParser(prog='')
         self._init_commands()
 
-    def create_client(config):
+    def create_client(self, config):
         self.config = config
         self.client = mtproto.MTProtoClient(config)
 
@@ -128,34 +128,6 @@ class CursesCLI(CLIApp):
         self.command_history = []
         self.command_history_idx = 0
         self.command_history_buf = []
-
-    def do_resize(self, output_win, separator_win, ps1_win, cmd_win):
-        height, width = self.stdscr.getmaxyx()
-        
-        self.stdscr.clear()
-        self.root_win.clear()
-
-        curses.resizeterm(height, width)
-        self.root_win.resize(height, width)
-
-        output_win.mvwin(0, 0)
-        output_win.resize(height-2, width)
-
-        separator_win.mvwin(height-2, 0)
-        separator_win.resize(1, width)
-        separator_win.hline(0, 0, '-', width)
-
-        cmd_win.clear()
-
-        #separator_win.move(height-2, 0)
-        #separator_win.hline(0, 0, '-', width)
-
-        self.stdscr.refresh()
-        self.root_win.refresh()
-        output_win.refresh()
-        separator_win.refresh()
-        ps1_win.refresh()
-        cmd_win.refresh()
 
     def add_cmd_history(self, buf):
         if 0 <= self.command_history_idx < len(self.command_history):
@@ -232,6 +204,8 @@ class CursesCLI(CLIApp):
 
         config = ConfigParser()
         config.read_file(args.config)
+        
+        self.create_client(config)
 
         buf = list()
 
@@ -281,7 +255,9 @@ class CursesCLI(CLIApp):
                 elif key == 'KEY_DOWN':
                     buf = self.next_cmd_history(buf)
                 elif key == 'KEY_RESIZE':
-                    self.do_resize(output_win, separator_win, ps1_win, cmd_win)
+                    ...
+                    # TODO: resize
+                    # self.do_resize(output_win, separator_win, ps1_win, cmd_win)
                 elif len(key) == 1 and key.isprintable():
                     cy, cx = cmd_win.getyx()
                     if 0 <= cx < 255 and len(buf) < 255:
