@@ -70,7 +70,13 @@ class CursesCLI:
     COMMAND_MODE = _InputMode.COMMAND_MODE
     EVAL_MODE = _InputMode.EVAL_MODE
 
+    @property
+    def testp(self):
+        return 'yay'
+
     def __init__(self):
+        self.done = False
+
         self.stdscr = None
         self.root_win = None
         self.cmd_win = None
@@ -125,7 +131,8 @@ class CursesCLI:
             print('MTProto client has not yet been created', file=sys.stderr)
 
     def cmd_quit(self):
-        raise Exception('exiting...')
+        print('exiting...', file=sys.stderr)
+        self.done = True
 
     def cmd_switch_to_eval_mode(self):
         self.mode = CursesCLI.EVAL_MODE
@@ -160,7 +167,8 @@ class CursesCLI:
         if string.strip() == '$':
             self.cmd_switch_to_command_mode()
         else:
-            print(eval(string, {}, self.__dict__.copy()))
+            _locals = dict(self=self, testp=self.testp)
+            print(eval(string, {}, _locals))
 
     def process_input(self, string):
         if self.mode == CursesCLI.COMMAND_MODE:
@@ -248,7 +256,7 @@ class CursesCLI:
 
         buf = list()
 
-        while True:
+        while not self.done:
             try:
                 key = self.cmd_win.getkey()
                 if key == '\n':
@@ -321,6 +329,7 @@ class CursesCLI:
 
         loop = asyncio.get_event_loop()
         self.exit_code = loop.run_until_complete(self._curses_refresh())
+        reset_stdio()
         loop.close()
 
     def run(self):
