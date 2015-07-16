@@ -321,7 +321,6 @@ class CursesCLI:
             except Exception as e:
                 print(e, file=sys.stderr)
             except KeyboardInterrupt as e:
-                reset_stdio()
                 return 130
 
     def _wrapped_run(self, stdscr):
