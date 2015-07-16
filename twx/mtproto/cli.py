@@ -93,6 +93,7 @@ class CursesCLI:
         self.client = mtproto.MTProtoClient(config)
 
     def _init_commands(self):
+        self.cmd_parser.set_defaults(func=lambda: None)
         subparsers = self.cmd_parser.add_subparsers(title='commands', prog='cmd', metavar='', help='')
 
         # echo
@@ -159,7 +160,7 @@ class CursesCLI:
         if string.strip() == '$':
             self.cmd_switch_to_command_mode()
         else:
-            print(eval(string, globals(), dict(self=self)))
+            print(eval(string, {}, self.__dict__.copy()))
 
     def process_input(self, string):
         if self.mode == CursesCLI.COMMAND_MODE:
