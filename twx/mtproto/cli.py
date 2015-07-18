@@ -90,7 +90,6 @@ class CursesCLI:
         self.exit_code = 0
         self.ps1_text = 'twx.mtproto$ '
         self.cmd_parser = argparse.ArgumentParser(prog='$')
-        self.eval_parser = argparse.ArgumentParser(prog='#')
         self._init_commands()
         self.mode = CursesCLI.COMMAND_MODE
 
