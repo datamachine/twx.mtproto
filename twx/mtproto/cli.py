@@ -7,6 +7,7 @@ import logging
 import sys
 import os
 import io
+import traceback
 
 sys.path.insert(0, os.getcwd())
 
@@ -80,27 +81,32 @@ class WindowLogHandler(logging.Handler):
         self.window = window
 
     def emit(self, record):
-        color_idx = self.color_map.get(record.levelno, Colors.DEFAULT)
-        color = curses.color_pair(color_idx)
+        self.acquire()
+        try:
+            color_idx = self.color_map.get(record.levelno, Colors.DEFAULT)
+            color_idx = record.__dict__.get('color', color_idx)
+            color = curses.color_pair(color_idx)
+            self.window.addstr('\n')
+            self.window.addstr(str(record.getMessage()), color)
+        finally:
+            self.release()
 
-        self.window.addstr('\n{}: {}'.format(color_idx, record.getMessage()), color)
+class StdioWrapper:
 
-class StdioWrapper(logging.Handler):
-
-    def __init__(self, window, *attrs):
-        self.window = window
-        self.attrs = attrs
+    def __init__(self, level):
+        self.level = level
 
     def write(self, string):
-        fmt = '\n{}'
-        if not string.strip():
-            fmt = '{}'
+        log = logging.getLogger('output')
+        ts = datetime.now().strftime('%x')
+        string = string.replace('\n', '\n{}:'.format(ts))
 
-        self.window.addstr(fmt.format(string), *self.attrs)
+        color = Colors.STDERR if self.level == logging.ERROR else Colors.STDOUT
+
+        log.log(self.level, '{}: {}'.format(ts, string), extra=dict(color=color))
 
     def flush(self):
         pass
-        # self.window.refresh()
 
 class Point2D(namedtuple('Point2D', 'x y')):
 
@@ -136,13 +142,11 @@ class Position(str, Enum):
     ABSOLUTE = 'absolute'
     RELATIVE = 'relative'
 
-
 class ReferenceBorder(str, Enum):
     TOP = 'top'
     BOTTOM = 'bottom'
     LEFT = 'left'
     RIGHT = 'right'
-
 
 class Window:
 
@@ -357,8 +361,8 @@ class CursesCLI:
         self.init_colors()
         self.init_windows()
 
-        stderr_wrapper = StdioWrapper(self.windows['output'], curses.color_pair(1))
-        stdout_wrapper = StdioWrapper(self.windows['output'], curses.color_pair(2))
+        stderr_wrapper = StdioWrapper(logging.INFO)
+        stdout_wrapper = StdioWrapper(logging.ERROR)
 
         set_stdio(stdout_wrapper, stderr_wrapper)
 
@@ -441,7 +445,9 @@ class CursesCLI:
                     win.noutrefresh()
                 curses.doupdate()
             except Exception as e:
-                self.output.critical(e)
+                exc_info = sys.exc_info()
+                fmt = traceback.format_exception(exc_info[0], exc_info[1], exc_info[2])
+                self.output.critical(''.join(fmt).rstrip())
             except KeyboardInterrupt as e:
                 return 130
 
