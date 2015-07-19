@@ -397,9 +397,7 @@ class CursesCLI:
                     win.noutrefresh()
                 curses.doupdate()
             except Exception as e:
-                with open('log.txt', 'a') as f:
-                    f.write(str(e))
-                logger.debug(e)
+                logger.critical(e)
             except KeyboardInterrupt as e:
                 return 130
 
