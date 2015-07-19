@@ -33,8 +33,6 @@ from twx.mtproto import mtproto
 from twx.mtproto.tl import *
 from twx.mtproto.util import to_hex
 
-print(__name__, ...)
-
 class Colors(int, Enum):
     DEFAULT = 1
     STDOUT = 2
@@ -357,7 +355,7 @@ class CursesCLI:
         input_win = self.windows['input']
         input_win.move(0, 0)
         input_win.keypad(1)
-        input_win.timeout(10)
+        input_win.timeout(0)
 
     def init_stdio_wrappers(self):
         stderr_wrapper = StdioWrapper(logging.INFO)
@@ -365,113 +363,111 @@ class CursesCLI:
 
         set_stdio(stdout_wrapper, stderr_wrapper)
 
+    def init(self):
+        self.init_colors()
+        self.init_windows()
+        self.init_stdio_wrappers()
+        self.input_buffer = list()
+        self.create_client(self.config)
+
+    @asyncio.coroutine
     def update_windows(self):
         for name, win in self.windows.items():
             win.noutrefresh()
         curses.doupdate()
-
-    def handle_input(self):
-        input_win = self.windows['input']
-        try:
-            key = input_win.getkey()
-        except curses.error as e:
-            # non blocking input, nothing to handle if nothing recieved
-            return
-
-        if key == '\n':
-            string = ''.join(self.input_buffer).strip()
-
-            if string.strip():
-                self.add_cmd_history(self.input_buffer)
-                self.output.info('{} {}'.format(self.ps1_text, string))
-            else:
-                self.output.info('')
-
-            self.input_buffer = list()
-            input_win.clear()
-            self.process_input(string)
-        elif key == '\x7f':
-            cy, cx = input_win.getyx()
-            if 0 < cx <= len(self.input_buffer):
-                del self.input_buffer[cx-1]
-                input_win.move(cy, cx-1)
-        elif key == '\x15':
-            cy, cx = input_win.getyx()
-            if 0 < cx:
-                if cx < len(self.input_buffer):
-                    del self.input_buffer[0:cx]
-                else:
-                    self.input_buffer = list()
-                input_win.move(0, 0)
-        elif key == 'KEY_LEFT':
-            cy, cx = input_win.getyx()
-            if 0 < cx:
-                input_win.move(cy, cx-1)
-        elif key == 'KEY_RIGHT':
-            cy, cx = input_win.getyx()
-            if cx < len(self.input_buffer):
-                input_win.move(cy, cx+1)
-        elif key == 'KEY_UP':
-            self.input_buffer = self.prev_cmd_history(self.input_buffer)
-            input_win.move(0, len(self.input_buffer))
-        elif key == 'KEY_DOWN':
-            self.input_buffer = self.next_cmd_history(self.input_buffer)
-            input_win.move(0, len(self.input_buffer))
-        elif key == 'KEY_RESIZE':
-            # TODO: resize
-            ...
-        elif len(key) == 1 and key.isprintable():
-            cy, cx = input_win.getyx()
-            if 0 <= cx < 255 and len(self.input_buffer) < 255:
-                self.input_buffer.insert(cx, key)
-                input_win.move(cy, cx+1)
-        else:
-            self.output.debug('unhandled key: \'{}\''.format(repr(key)))
-
-        cy, cx = input_win.getyx()
-        input_win.clear()
-
-        input_win.addstr(''.join(self.input_buffer))
-        input_win.move(cy, cx)
+        yield from asyncio.sleep(1/240)
 
     @asyncio.coroutine
-    def curses_main(self):
+    def handle_input(self):
+        try:
+            input_win = self.windows['input']
 
-        self.init_colors()
-        self.init_windows()
-        self.init_stdio_wrappers()
-        
-        self.create_client(self.config)
+            key = input_win.getkey()
 
-        self.input_buffer = list()
+            if key == '\n':
+                string = ''.join(self.input_buffer).strip()
 
-        self.update_windows()
+                if string.strip():
+                    self.add_cmd_history(self.input_buffer)
+                    self.output.info('{} {}'.format(self.ps1_text, string))
+                else:
+                    self.output.info('')
 
-        while not self.done:
-            try:
-                self.handle_input()
-            except KeyboardInterrupt as e:
-                return 130
-            except Exception as e:
-                exc_info = sys.exc_info()
-                fmt = traceback.format_exception(exc_info[0], exc_info[1], exc_info[2])
-                self.output.critical(''.join(fmt).rstrip())
-            finally:
-                self.update_windows()
+                self.input_buffer = list()
+                input_win.clear()
+                self.process_input(string)
+            elif key == '\x7f':
+                cy, cx = input_win.getyx()
+                if 0 < cx <= len(self.input_buffer):
+                    del self.input_buffer[cx-1]
+                    input_win.move(cy, cx-1)
+            elif key == '\x15':
+                cy, cx = input_win.getyx()
+                if 0 < cx:
+                    if cx < len(self.input_buffer):
+                        del self.input_buffer[0:cx]
+                    else:
+                        self.input_buffer = list()
+                    input_win.move(0, 0)
+            elif key == 'KEY_LEFT':
+                cy, cx = input_win.getyx()
+                if 0 < cx:
+                    input_win.move(cy, cx-1)
+            elif key == 'KEY_RIGHT':
+                cy, cx = input_win.getyx()
+                if cx < len(self.input_buffer):
+                    input_win.move(cy, cx+1)
+            elif key == 'KEY_UP':
+                self.input_buffer = self.prev_cmd_history(self.input_buffer)
+                input_win.move(0, len(self.input_buffer))
+            elif key == 'KEY_DOWN':
+                self.input_buffer = self.next_cmd_history(self.input_buffer)
+                input_win.move(0, len(self.input_buffer))
+            elif key == 'KEY_RESIZE':
+                # TODO: resize
+                ...
+            elif len(key) == 1 and key.isprintable():
+                cy, cx = input_win.getyx()
+                if 0 <= cx < 255 and len(self.input_buffer) < 255:
+                    self.input_buffer.insert(cx, key)
+                    input_win.move(cy, cx+1)
+            else:
+                self.output.debug('unhandled key: \'{}\''.format(repr(key)))
 
-            yield from asyncio.sleep(.01)
+            cy, cx = input_win.getyx()
+            input_win.clear()
 
-    def run(self):
-        @curses.wrapper
-        def do_run(stdscr):
+            input_win.addstr(''.join(self.input_buffer))
+            input_win.move(cy, cx)
+        except curses.error as e:
+            pass
+
+    def asyncio_main(self, stdscr):
+        try:
             self.windows['stdscr'] = stdscr
+            self.init()
+
+            result = 0
             loop = asyncio.get_event_loop()
-            result = loop.run_until_complete(self.curses_main())
+            while not self.done:
+                tasks = [
+                    asyncio.async(self.handle_input()),
+                    asyncio.async(self.update_windows()),
+                ]
+
+                loop.run_until_complete(asyncio.wait(tasks))
+        except KeyboardInterrupt as e:
+            result = 130
+        finally:
             reset_stdio()
             loop.close()
             return result
 
-        return do_run()
+    def run(self):
+        def do_run(stdscr):
+            self.asyncio_main(stdscr)
+
+        return curses.wrapper(do_run)
 
 def main():
     parser = argparse.ArgumentParser()
