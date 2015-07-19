@@ -1,39 +1,31 @@
+import logging
+
 from ipaddress import ip_address
 from collections import namedtuple
+from urllib.parse import urlsplit
 
-class BuiltinDC(namedtuple('BuiltinDC', 'id address port')):
+from . connection import MTProtoConnection
 
-    def __new__(cls, id, address, port):
-        return tuple.__new__(cls, (int(id), ip_address(address), int(port),))
+log = logging.getLogger(__name__)
 
-class MTProtoDC:
-    _builtin_dcs = [
-        BuiltinDC(1, '149.154.175.50', 443),
-        BuiltinDC(2, '149.154.167.51', 443),
-        BuiltinDC(3, '149.154.175.100', 443),
-        BuiltinDC(4, '149.154.167.91', 443),
-        BuiltinDC(5, '149.154.171.5', 443),
-    ]
+class DCInfo(namedtuple('DCInfo', 'address port connection_type')):
 
-    _builtInDcsIPv6 = [
-        BuiltinDC(1, '2001:b28:f23d:f001::a', 443),
-        BuiltinDC(2, '2001:67c:4e8:f002::a', 443),
-        BuiltinDC(3, '2001:b28:f23d:f003::a', 443),
-        BuiltinDC(4, '2001:67c:4e8:f004::a', 443),
-        BuiltinDC(5, '2001:b28:f23f:f005::a', 443),
-    ]
+    def __new__(cls, address, port, connection_type):
+        return super().__new__(cls, ip_address(address), int(port), MTProtoConnection.ConnectionType(connection_type))
 
-    _builtInTestDcs = [
-        BuiltinDC(1, '149.154.175.10', 443),
-        BuiltinDC(2, '149.154.167.40', 443),
-        BuiltinDC(3, '149.154.175.117', 443),
-    ]
+    @classmethod
+    def new(cls, url):
+        url = urlsplit(url)
+        return cls(url.hostname, url.port, url.scheme.upper())
 
-    _builtInTestDcsIPv6 = [
-        BuiltinDC(1, '2001:b28:f23d:f001::e', 443),
-        BuiltinDC(2, '2001:67c:4e8:f002::e', 443),
-        BuiltinDC(3, '2001:b28:f23d:f003::e', 443),
-    ]
 
-if __name__ == '__main__':
-    dc = MTProtoDC()
+class DataCenter:
+
+    def __init__(self, url):
+        self.dc_info = DCInfo.new(url)
+        self.connections = []
+
+    def establish_connection(self):
+        connection = MTProtoConnection(self.dc_info.connection_type)
+        print('test', ...)
+        log.debug('connection')

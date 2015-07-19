@@ -19,6 +19,8 @@ from . import crypt
 from . import prime
 
 from . import tl
+from . import dc
+from . session import MTProtoSession
 
 from . authkey import MTProtoAuthKey, aes_encrypt, aes_decrypt
 
@@ -549,15 +551,32 @@ class MTProtoTCPMessage(namedtuple('MTProtoTCPMessage', 'data')):
 
 class MTProtoClient:
 
-    def __init__(self, config):
-        from urllib.parse import urlsplit
+    def __init__(self, config, session_id=None, use_test_dc=True):
 
         self.api_id = config.get('app', 'api_id')
         self.api_hash = config.get('app', 'api_hash')
         self.app_title = config.get('app', 'app_title')
         self.short_name = config.get('app', 'short_name')
-        self.public_keys = config.get('servers', 'public_keys')
-        self.test_dc = urlsplit(config.get('servers', 'test_dc'))
 
-    def init_connection(self):
-        MTProto('FFFFFFFFF', 'EEEEEEEE', self.public_keys)
+        self.public_keys = config.get('servers', 'public_keys')
+
+        self.test_dc = dc.DataCenter(config.get('servers', 'test_dc'))
+        self.productinon_dc = dc.DataCenter(config.get('servers', 'production_dc'))
+
+        if session_id is None:
+            self.session = MTProtoSession.new()
+        else:
+            self.session = MTProtoSession(session_id)
+
+        self.use_test_dc = use_test_dc
+
+    @property
+    def datacenter(self):
+        if self.use_test_dc:
+            return self.test_dc
+        else:
+            return self.productinon_dc
+
+    def init(self):
+        print('establishing connection...')
+        self.datacenter.establish_connection()

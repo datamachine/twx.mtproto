@@ -2,6 +2,8 @@
 
 from __future__ import print_function
 
+import logging
+
 import sys
 import os
 import io
@@ -9,9 +11,6 @@ import io
 sys.path.insert(0, os.getcwd())
 
 import argparse
-from twx.mtproto import mtproto
-from twx.mtproto.tl import *
-from twx.mtproto.util import to_hex
 
 from configparser import ConfigParser
 
@@ -25,6 +24,13 @@ from functools import partial
 from io import StringIO, StringIO
 from datetime import datetime
 
+import atexit
+
+from collections import OrderedDict
+
+from twx.mtproto import mtproto
+from twx.mtproto.tl import *
+from twx.mtproto.util import to_hex
 
 def save_stdio_state(func):
     sys_stdout = sys.stdout
@@ -35,6 +41,7 @@ def save_stdio_state(func):
             stdout = sys_stdout
         if stderr is None:
             stderr = sys_stderr
+
         return func(stdout, stderr)
 
     return wrapper
@@ -44,43 +51,99 @@ def set_stdio(stdout, stderr):
     sys.stdout = stdout
     sys.stderr = stderr
 
+@atexit.register
 def reset_stdio():
     set_stdio(None, None)
 
-class _Stdio:
 
-    def __init__(self, output_win, *attrs):
-        self.output_win = output_win
+class WindowLogHandler(logging.Handler):
+
+    def __init__(self, window):
+        logging.Handler.__init__(self)
+        self.window = window
+
+    def emit(self, record):
+        self.window.addstr('\n{}'.format(record.getMessage()))
+
+class StdioWrapper(logging.Handler):
+
+    def __init__(self, window, *attrs):
+        self.window = window
         self.attrs = attrs
 
-    def write(self, string, ts=False):
-        if ts:
-            string = '{}: {}'.format(datetime.now().strftime('%X.%f'), string)
-        self.output_win.addstr(string, *self.attrs)
-        self.flush()
+    def write(self, string):
+        fmt = '\n{}'
+        if not string.strip():
+            fmt = '{}'
+
+        self.window.addstr(fmt.format(string), *self.attrs)
 
     def flush(self):
-        self.output_win.refresh()
+        pass
+        # self.window.refresh()
+
+class Point2D(namedtuple('Point2D', 'x y')):
+
+    def __new__(cls, x, y=None):
+        if y is None:
+            iterable = x
+            return tuple.__new__(cls, iterable)
+        else:
+            return super().__new__(cls, x, y)
+
+
+class Size2D(namedtuple('Size2D', 'width height')):
+
+    def __new__(cls, width, height=None):
+        if height is None:
+            iterable = width
+            return tuple.__new__(cls, iterable)
+        else:
+            return super().__new__(cls, width, height)
+
+
+class Rect2D(namedtuple('Rect2D', 'loc size')):
+
+    def __new__(cls, loc, size=None):
+        if size is None:
+            iterable = loc
+            return tuple.__new__(cls, iterable)
+        else:
+            return super().__new__(cls, loc, size)
+
+
+class Position(str, Enum):
+    ABSOLUTE = 'absolute'
+    RELATIVE = 'relative'
+
+
+class ReferenceBorder(str, Enum):
+    TOP = 'top'
+    BOTTOM = 'bottom'
+    LEFT = 'left'
+    RIGHT = 'right'
+
+
+class Window:
+
+    def __init__(self, parent, rect, position=Position.ABSOLUTE, ref=ReferenceBorder.TOP):
+        self.parent = parent
+        self.rect = Rect2D(rect)
+        self.position = Position(position)
+        self.ref = ReferenceBorder(ref)
 
 
 class CursesCLI:
 
-    _InputMode = Enum('IntputMode', 'COMMAND_MODE EVAL_MODE')
+    _InputMode = Enum('InputMode', 'COMMAND_MODE EVAL_MODE')
 
     COMMAND_MODE = _InputMode.COMMAND_MODE
     EVAL_MODE = _InputMode.EVAL_MODE
 
-    @property
-    def testp(self):
-        return 'yay'
-
     def __init__(self):
         self.done = False
 
-        self.stdscr = None
-        self.root_win = None
-        self.cmd_win = None
-        self.ps1_win = None
+        self.windows = OrderedDict()
 
         self.command_history = []
         self.command_history_idx = 0
@@ -88,7 +151,7 @@ class CursesCLI:
         self.config = None
         self.client = None
         self.exit_code = 0
-        self.ps1_text = 'twx.mtproto$ '
+        self.ps1_text = 'twx.mtproto$'
         self.cmd_parser = argparse.ArgumentParser(prog='$')
         self._init_commands()
         self.mode = CursesCLI.COMMAND_MODE
@@ -125,7 +188,7 @@ class CursesCLI:
 
     def cmd_init(self):
         if self.client is not None:
-            self.client.init_connection()
+            self.client.init()
         else:
             print('MTProto client has not yet been created', file=sys.stderr)
 
@@ -135,18 +198,16 @@ class CursesCLI:
 
     def cmd_switch_to_eval_mode(self):
         self.mode = CursesCLI.EVAL_MODE
-        self.ps1_text = 'twx.mtproto# '
-        self.ps1_win.clear()
-        self.ps1_win.addstr(self.ps1_text)
-        self.ps1_win.refresh()
+        self.ps1_text = 'twx.mtproto#'
+        ps1_win.clear()
+        ps1_win.addstr(self.ps1_text)
         print("Now in eval mode. Enter '$' to return to command mode")
 
     def cmd_switch_to_command_mode(self):
         self.mode = CursesCLI.COMMAND_MODE
-        self.ps1_text = 'twx.mtproto$ '
-        self.ps1_win.clear()
-        self.ps1_win.addstr(self.ps1_text)
-        self.ps1_win.refresh()
+        self.ps1_text = 'twx.mtproto$'
+        ps1_win.clear()
+        ps1_win.addstr(self.ps1_text)
         print("Now in command mode. Enter '-h' for help")
 
     def process_cmd_input(self, string):
@@ -166,7 +227,7 @@ class CursesCLI:
         if string.strip() == '$':
             self.cmd_switch_to_command_mode()
         else:
-            _locals = dict(self=self, testp=self.testp)
+            _locals = dict(self=self)
             print(eval(string, {}, _locals))
 
     def process_input(self, string):
@@ -212,11 +273,14 @@ class CursesCLI:
 
     @asyncio.coroutine
     def _curses_refresh(self):
-        height, width = self.stdscr.getmaxyx()
+        stdscr = self.windows['stdscr']
+        height, width = stdscr.getmaxyx()
 
-        self.root_win = self.stdscr.subwin(height, width, 0, 0)
+        self.windows['root'] = stdscr.subwin(height, width, 0, 0)
+        root_win = self.windows['root']
 
-        output_win = self.root_win.subwin(height-2, width, 0, 0)
+        self.windows['output'] = root_win.subwin(height-2, width, 0, 0)
+        output_win = self.windows['output']
 
         output_win.idlok(1)
         output_win.scrollok(1)
@@ -224,25 +288,28 @@ class CursesCLI:
         y, x = output_win.getmaxyx()
         output_win.move(y-1, 0)
 
-        separator_win = self.root_win.subwin(1, x, y, 0)
+        curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
+        curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
+
+        stderr_wrapper = StdioWrapper(output_win, curses.color_pair(1))
+        stdout_wrapper = StdioWrapper(output_win, curses.color_pair(2))
+
+        set_stdio(stdout_wrapper, stderr_wrapper)
+
+        cy, cx = output_win.getmaxyx()
+        self.windows['separator'] = root_win.derwin(1, cx, cy, 0)
+        separator_win = self.windows['separator']
         separator_win.hline(0, 0, '-', x)
-        separator_win.refresh()
-        
-        ps1_text = self.ps1_text
-        self.ps1_win = self.root_win.subwin(1, len(ps1_text)+1, height-1, 0)
-        self.ps1_win.addstr(ps1_text)
-        self.ps1_win.refresh()
 
-        self.cmd_win = self.root_win.subwin(1, width - len(ps1_text)-1, height-1, len(ps1_text))
-        self.cmd_win.move(0,0)
-        self.cmd_win.keypad(1)
+        self.windows['ps1'] = root_win.derwin(1, len(self.ps1_text)+1, height-1, 0)
+        ps1_win = self.windows['ps1']
+        ps1_win.addstr(self.ps1_text)
 
-        curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_RED)
-
-        stdout = _Stdio(output_win)
-        stderr = _Stdio(output_win, curses.color_pair(1))
-
-        set_stdio(stdout, stderr)
+        cy, cx = ps1_win.getmaxyx()
+        self.windows['commands'] = root_win.derwin(1, width - cx, height-1, cx)
+        cmd_win = self.windows['commands']
+        cmd_win.move(0, 0)
+        cmd_win.keypad(1)
 
         parser = argparse.ArgumentParser()
         parser.add_argument('--config', type=argparse.FileType(), default='mtproto.conf')
@@ -255,75 +322,89 @@ class CursesCLI:
 
         buf = list()
 
+        window_handler = WindowLogHandler(output_win)
+        window_handler.setLevel(logging.DEBUG)
+
+        logger = logging.getLogger('output_win')
+        logger.addHandler(window_handler)
+        logger.setLevel(logging.DEBUG)
+
+        for name, win in self.windows.items():
+            win.noutrefresh()
+        curses.doupdate()
+
         while not self.done:
             try:
-                key = self.cmd_win.getkey()
+                key = cmd_win.getkey()
                 if key == '\n':
                     string = ''.join(buf).strip()
-                    
+
                     if string.strip():
                         self.add_cmd_history(buf)
-                        fmt = '{}: {}\n'.format(datetime.now().strftime('%X.%f'), string)
-                        output_win.addstr(fmt)
-                        output_win.refresh()
+                        logger.info(string)
+                        logger.info(curses.__file__)
                     else:
                         output_win.addstr('\n')
-                        output_win.refresh()
 
                     buf = list()
-                    self.cmd_win.clear()
+                    cmd_win.clear()
                     self.process_input(string)
                 elif key == '\x7f':
-                    cy, cx = self.cmd_win.getyx()
+                    cy, cx = cmd_win.getyx()
                     if 0 < cx <= len(buf):
                         del buf[cx-1]
-                        self.cmd_win.move(cy, cx-1)
+                        cmd_win.move(cy, cx-1)
                 elif key == '\x15':
-                    cy, cx = self.cmd_win.getyx()
+                    cy, cx = cmd_win.getyx()
                     if 0 < cx:
                         if cx < len(buf):
                             del buf[0:cx]
                         else:
                             buf = list()
-                        self.cmd_win.move(0, 0)
+                        cmd_win.move(0, 0)
                 elif key == 'KEY_LEFT':
-                    cy, cx = self.cmd_win.getyx()
+                    cy, cx = cmd_win.getyx()
                     if 0 < cx:
-                        self.cmd_win.move(cy, cx-1)
+                        cmd_win.move(cy, cx-1)
                 elif key == 'KEY_RIGHT':
-                    cy, cx = self.cmd_win.getyx()
+                    cy, cx = cmd_win.getyx()
                     if cx < len(buf):
-                        self.cmd_win.move(cy, cx+1)
+                        cmd_win.move(cy, cx+1)
                 elif key == 'KEY_UP':
                     buf = self.prev_cmd_history(buf)
+                    cmd_win.move(0, len(buf))
                 elif key == 'KEY_DOWN':
                     buf = self.next_cmd_history(buf)
+                    cmd_win.move(0, len(buf))
                 elif key == 'KEY_RESIZE':
                     # TODO: resize
                     ...
                 elif len(key) == 1 and key.isprintable():
-                    cy, cx = self.cmd_win.getyx()
+                    cy, cx = cmd_win.getyx()
                     if 0 <= cx < 255 and len(buf) < 255:
                         buf.insert(cx, key)
-                        self.cmd_win.move(cy, cx+1)
+                        cmd_win.move(cy, cx+1)
                 else:
-                    print('unhandled key: \'{}\''.format(repr(key)))
+                    logger.debug('unhandled key: \'{}\''.format(repr(key)))
 
-                cy, cx = self.cmd_win.getyx()
-                self.cmd_win.clear()
-                self.cmd_win.refresh()
+                cy, cx = cmd_win.getyx()
+                cmd_win.clear()
 
-                self.cmd_win.addstr(''.join(buf))
-                self.cmd_win.move(cy, cx)
-                output_win.refresh()
-                self.cmd_win.refresh()
+                cmd_win.addstr(''.join(buf))
+                cmd_win.move(cy, cx)
+
+                for name, win in self.windows.items():
+                    win.noutrefresh()
+                curses.doupdate()
             except Exception as e:
-                print(e, file=sys.stderr)
+                with open('log.txt', 'a') as f:
+                    f.write(str(e))
+                logger.debug(e)
             except KeyboardInterrupt as e:
                 return 130
 
     def _wrapped_run(self, stdscr):
-        self.stdscr = stdscr
+        self.windows['stdscr'] = stdscr
 
         loop = asyncio.get_event_loop()
         self.exit_code = loop.run_until_complete(self._curses_refresh())
@@ -332,12 +413,14 @@ class CursesCLI:
     def run(self):
         locale.setlocale(locale.LC_ALL, '')
         curses.wrapper(self._wrapped_run)
-        reset_stdio()
-        sys.exit(self.exit_code)
+        return self.exit_code
 
 def main():
     cli = CursesCLI()
-    cli.run()
+    code = cli.run()
+    reset_stdio()
+    sys.exit(code)
 
 if __name__ == "__main__":
+
     main()

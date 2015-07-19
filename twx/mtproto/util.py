@@ -3,8 +3,6 @@ from codecs import encode
 import logging
 import zlib
 
-logging.basicConfig(filename='debug.log', level=logging.DEBUG)
-
 def substr(string, pos, length):
     return string[pos:pos+length]
 

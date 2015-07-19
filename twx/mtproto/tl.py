@@ -217,6 +217,8 @@ class long_c(Long, TLConstructor):
     name = 'long'
 Long.add_constuctor(long_c)
 
+int64_c = long_c  # utility alias
+
 
 class Double(int, TLType):
     constructors = {}
