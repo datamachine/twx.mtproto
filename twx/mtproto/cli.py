@@ -451,7 +451,7 @@ class CursesCLI:
             except KeyboardInterrupt as e:
                 return 130
 
-    def _wrapped_run(self, stdscr):
+    def run_curses(self, stdscr):
         self.windows['stdscr'] = stdscr
 
         loop = asyncio.get_event_loop()
@@ -460,15 +460,12 @@ class CursesCLI:
 
     def run(self):
         locale.setlocale(locale.LC_ALL, '')
-        curses.wrapper(self._wrapped_run)
+        curses.wrapper(self.run_curses)
+        reset_stdio()
         return self.exit_code
 
 def main():
-    cli = CursesCLI()
-    code = cli.run()
-    reset_stdio()
-    sys.exit(code)
+    return CursesCLI().run()
 
 if __name__ == "__main__":
-
-    main()
+    sys.exit(main())
