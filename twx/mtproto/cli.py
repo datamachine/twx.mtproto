@@ -357,7 +357,9 @@ class CursesCLI:
         input_win.keypad(1)
 
     @asyncio.coroutine
-    def _curses_refresh(self):
+    def curses_main(self, stdscr):
+        self.windows['stdscr'] = stdscr
+
         self.init_colors()
         self.init_windows()
 
@@ -451,18 +453,16 @@ class CursesCLI:
             except KeyboardInterrupt as e:
                 return 130
 
-    def run_curses(self, stdscr):
-        self.windows['stdscr'] = stdscr
-
-        loop = asyncio.get_event_loop()
-        self.exit_code = loop.run_until_complete(self._curses_refresh())
-        loop.close()
-
     def run(self):
-        locale.setlocale(locale.LC_ALL, '')
-        curses.wrapper(self.run_curses)
-        reset_stdio()
-        return self.exit_code
+        @curses.wrapper
+        def do_run(stdscr):
+            loop = asyncio.get_event_loop()
+            result = loop.run_until_complete(self.curses_main(stdscr))
+            reset_stdio()
+            loop.close()
+            return result
+
+        return do_run()
 
 def main():
     return CursesCLI().run()
