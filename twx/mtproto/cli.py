@@ -171,6 +171,7 @@ class CursesCLI:
 
         self.windows = OrderedDict()
 
+        self.input_buffer = list()
         self.command_history = []
         self.command_history_idx = 0
         self.command_history_buf = []
@@ -186,7 +187,6 @@ class CursesCLI:
     def output(self):
         return logging.getLogger('output')
     
-
     def create_client(self, config):
         self.config = config
         self.client = mtproto.MTProtoClient(config)
@@ -373,7 +373,7 @@ class CursesCLI:
         
         self.create_client(self.config)
 
-        buf = list()
+        self.input_buffer = list()
 
         for name, win in self.windows.items():
             win.noutrefresh()
@@ -384,29 +384,29 @@ class CursesCLI:
             try:
                 key = input_win.getkey()
                 if key == '\n':
-                    string = ''.join(buf).strip()
+                    string = ''.join(self.input_buffer).strip()
 
                     if string.strip():
-                        self.add_cmd_history(buf)
+                        self.add_cmd_history(self.input_buffer)
                         self.output.info('{} {}'.format(self.ps1_text, string))
                     else:
                         self.output.info('')
 
-                    buf = list()
+                    self.input_buffer = list()
                     input_win.clear()
                     self.process_input(string)
                 elif key == '\x7f':
                     cy, cx = input_win.getyx()
-                    if 0 < cx <= len(buf):
-                        del buf[cx-1]
+                    if 0 < cx <= len(self.input_buffer):
+                        del self.input_buffer[cx-1]
                         input_win.move(cy, cx-1)
                 elif key == '\x15':
                     cy, cx = input_win.getyx()
                     if 0 < cx:
-                        if cx < len(buf):
-                            del buf[0:cx]
+                        if cx < len(self.input_buffer):
+                            del self.input_buffer[0:cx]
                         else:
-                            buf = list()
+                            self.input_buffer = list()
                         input_win.move(0, 0)
                 elif key == 'KEY_LEFT':
                     cy, cx = input_win.getyx()
@@ -414,21 +414,21 @@ class CursesCLI:
                         input_win.move(cy, cx-1)
                 elif key == 'KEY_RIGHT':
                     cy, cx = input_win.getyx()
-                    if cx < len(buf):
+                    if cx < len(self.input_buffer):
                         input_win.move(cy, cx+1)
                 elif key == 'KEY_UP':
-                    buf = self.prev_cmd_history(buf)
-                    input_win.move(0, len(buf))
+                    self.input_buffer = self.prev_cmd_history(self.input_buffer)
+                    input_win.move(0, len(self.input_buffer))
                 elif key == 'KEY_DOWN':
-                    buf = self.next_cmd_history(buf)
-                    input_win.move(0, len(buf))
+                    self.input_buffer = self.next_cmd_history(self.input_buffer)
+                    input_win.move(0, len(self.input_buffer))
                 elif key == 'KEY_RESIZE':
                     # TODO: resize
                     ...
                 elif len(key) == 1 and key.isprintable():
                     cy, cx = input_win.getyx()
-                    if 0 <= cx < 255 and len(buf) < 255:
-                        buf.insert(cx, key)
+                    if 0 <= cx < 255 and len(self.input_buffer) < 255:
+                        self.input_buffer.insert(cx, key)
                         input_win.move(cy, cx+1)
                 else:
                     self.output.debug('unhandled key: \'{}\''.format(repr(key)))
@@ -436,7 +436,7 @@ class CursesCLI:
                 cy, cx = input_win.getyx()
                 input_win.clear()
 
-                input_win.addstr(''.join(buf))
+                input_win.addstr(''.join(self.input_buffer))
                 input_win.move(cy, cx)
 
                 for name, win in self.windows.items():
