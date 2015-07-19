@@ -33,6 +33,8 @@ from twx.mtproto import mtproto
 from twx.mtproto.tl import *
 from twx.mtproto.util import to_hex
 
+print(__name__, ...)
+
 class Colors(int, Enum):
     DEFAULT = 1
     STDOUT = 2
@@ -164,7 +166,7 @@ class CursesCLI:
     COMMAND_MODE = _InputMode.COMMAND_MODE
     EVAL_MODE = _InputMode.EVAL_MODE
 
-    def __init__(self):
+    def __init__(self, config=None):
         self.done = False
 
         self.windows = OrderedDict()
@@ -172,7 +174,7 @@ class CursesCLI:
         self.command_history = []
         self.command_history_idx = 0
         self.command_history_buf = []
-        self.config = None
+        self.config = config
         self.client = None
         self.exit_code = 0
         self.ps1_text = 'twx.mtproto$'
@@ -356,26 +358,20 @@ class CursesCLI:
         input_win.move(0, 0)
         input_win.keypad(1)
 
-    @asyncio.coroutine
-    def curses_main(self, stdscr):
-        self.windows['stdscr'] = stdscr
-
-        self.init_colors()
-        self.init_windows()
-
+    def init_stdio_wrappers(self):
         stderr_wrapper = StdioWrapper(logging.INFO)
         stdout_wrapper = StdioWrapper(logging.ERROR)
 
         set_stdio(stdout_wrapper, stderr_wrapper)
 
-        parser = argparse.ArgumentParser()
-        parser.add_argument('--config', type=argparse.FileType(), default='mtproto.conf')
-        args = parser.parse_args()
+    @asyncio.coroutine
+    def curses_main(self):
 
-        config = ConfigParser()
-        config.read_file(args.config)
+        self.init_colors()
+        self.init_windows()
+        self.init_stdio_wrappers()
         
-        self.create_client(config)
+        self.create_client(self.config)
 
         buf = list()
 
@@ -456,8 +452,9 @@ class CursesCLI:
     def run(self):
         @curses.wrapper
         def do_run(stdscr):
+            self.windows['stdscr'] = stdscr
             loop = asyncio.get_event_loop()
-            result = loop.run_until_complete(self.curses_main(stdscr))
+            result = loop.run_until_complete(self.curses_main())
             reset_stdio()
             loop.close()
             return result
@@ -465,7 +462,14 @@ class CursesCLI:
         return do_run()
 
 def main():
-    return CursesCLI().run()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--config', type=argparse.FileType(), default='mtproto.conf')
+    args = parser.parse_args()
+
+    config = ConfigParser()
+    config.read_file(args.config)
+
+    return CursesCLI(config).run()
 
 if __name__ == "__main__":
     sys.exit(main())
