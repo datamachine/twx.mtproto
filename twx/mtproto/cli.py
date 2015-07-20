@@ -358,8 +358,8 @@ class CursesCLI:
         input_win.timeout(0)
 
     def init_stdio_wrappers(self):
-        stderr_wrapper = StdioWrapper(logging.INFO)
-        stdout_wrapper = StdioWrapper(logging.ERROR)
+        stdout_wrapper = StdioWrapper(logging.INFO)
+        stderr_wrapper = StdioWrapper(logging.ERROR)
 
         set_stdio(stdout_wrapper, stderr_wrapper)
 

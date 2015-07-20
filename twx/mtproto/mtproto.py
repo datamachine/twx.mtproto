@@ -565,8 +565,10 @@ class MTProtoClient:
 
         if session_id is None:
             self.session = MTProtoSession.new()
+            print('creating new session: {}'.format(self.session))
         else:
             self.session = MTProtoSession(session_id)
+            print('continuing session: {}'.format(self.session))
 
         self.use_test_dc = use_test_dc
 
