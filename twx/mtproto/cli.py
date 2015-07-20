@@ -450,14 +450,17 @@ class CursesCLI:
             result = 0
             loop = asyncio.get_event_loop()
             while not self.done:
-                tasks = [
-                    asyncio.async(self.handle_input()),
-                    asyncio.async(self.update_windows()),
-                ]
+                try:
+                    tasks = [
+                        asyncio.async(self.handle_input()),
+                        asyncio.async(self.update_windows()),
+                    ]
 
-                loop.run_until_complete(asyncio.wait(tasks))
-        except KeyboardInterrupt as e:
-            result = 130
+                    loop.run_until_complete(asyncio.wait(tasks))
+                except KeyboardInterrupt as e:
+                    loop.run_until_complete(asyncio.wait(tasks))
+                    result = 130
+                    self.done = True
         finally:
             reset_stdio()
             loop.close()
