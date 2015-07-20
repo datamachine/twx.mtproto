@@ -219,10 +219,10 @@ class CursesCLI:
         if self.client is not None:
             self.client.init()
         else:
-            print('MTProto client has not yet been created', file=sys.stderr)
+            self.output.info('MTProto client has not yet been created')
 
     def cmd_quit(self):
-        print('exiting...', file=sys.stderr)
+        self.output.info('exiting...')
         self.done = True
 
     def cmd_switch_to_eval_mode(self):
@@ -233,7 +233,7 @@ class CursesCLI:
         ps1_win.clear()
         ps1_win.addstr(self.ps1_text)
 
-        print("Now in eval mode. Enter '$' to return to command mode")
+        self.output.info("Now in eval mode. Enter '$' to return to command mode")
 
     def cmd_switch_to_command_mode(self):
         ps1_win = self.windows['ps1']
@@ -243,7 +243,7 @@ class CursesCLI:
         ps1_win.clear()
         ps1_win.addstr(self.ps1_text)
 
-        print("Now in command mode. Enter '-h' for help")
+        self.output.info("Now in command mode. Enter '-h' for help")
 
     def process_cmd_input(self, string):
         cmd = shlex.split(string)
@@ -263,7 +263,7 @@ class CursesCLI:
             self.cmd_switch_to_command_mode()
         else:
             _locals = dict(self=self)
-            print(eval(string, {}, _locals))
+            self.output.info(eval(string, {}, _locals))
 
     def process_input(self, string):
         if self.mode == CursesCLI.COMMAND_MODE:
