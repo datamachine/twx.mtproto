@@ -166,16 +166,6 @@ class CLICommandError(Exception):
 
 class CLICommand:
 
-    def exit(self, status, message):
-        if callable(self._exit_cb):
-            self._exit_cb(status, message)
-        raise CLICommandExit()
-
-    def error(self, message):
-        if callable(self._error_cb):
-            self._error_cb(message)
-        raise CLICommandError()
-
     def __init__(self, *args, **kwargs):
         self.arg_parser = argparse.ArgumentParser(*args, **kwargs)
         setattr(self.arg_parser, 'exit', self.exit)
@@ -186,11 +176,10 @@ class CLICommand:
 
         self.default_args = []
 
-        self.callbacks = dict()
         self.default_action = CLICommand._default
+        self._sub_parser_stack = [self.arg_parser]
 
         self.sub_parsers = self.arg_parser.add_subparsers(title='commands', metavar='')
-        self._sub_parser_stack = list()
 
     def __call__(self, name, *args, **kwargs):
         if 'help' not in kwargs:
@@ -198,7 +187,7 @@ class CLICommand:
         self._sub_parser_stack.append(self.sub_parsers.add_parser(name, *args, **kwargs))
 
         def wrapper(func):
-            self.callbacks[name] = func
+            self._sub_parser_stack[-1].set_defaults(_cmd_func=func)
             del self._sub_parser_stack[-1]
             return func
 
@@ -230,11 +219,22 @@ class CLICommand:
     def run_cmd(self, cmd_str):
         try:
             argv = shlex.split(cmd_str)
+            if not argv:
+                return
+
             args = self.arg_parser.parse_args(argv)
-            func = self.default_action
-            if argv and self.callbacks.get(argv[0]):
-                func = self.callbacks.get(argv[0])
-            func(*(self.default_args + args._get_args()), **dict(args._get_kwargs()))
+
+            try:
+                func = args._cmd_func
+            except AttributeError:
+                func = self.default_action
+
+            cmd_args = self.default_args + args._get_args()
+
+            cmd_kwargs = dict(args._get_kwargs())
+            del cmd_kwargs['_cmd_func']
+
+            func(*cmd_args, **cmd_kwargs)
         except CLICommandExit as e:
             pass
         except CLICommandError as e:
@@ -242,8 +242,15 @@ class CLICommand:
         except SystemExit:
             pass
 
-    def exit(self, status=0, message=None):
+    def exit(self, status, message):
+        if callable(self._exit_cb):
+            self._exit_cb(status, message)
         raise CLICommandExit()
+
+    def error(self, message):
+        if callable(self._error_cb):
+            self._error_cb(message)
+        raise CLICommandError()
 
 
 class CursesCLI():
@@ -293,7 +300,7 @@ class CursesCLI():
         self.client = mtproto.MTProtoClient(config)
 
     @command('help')
-    def main_help(self):
+    def cmd_help(self):
         self.output.info(self.command.arg_parser.format_help())
 
     @command('echo')
@@ -336,6 +343,7 @@ class CursesCLI():
         ps1_win.addstr(self.ps1_text)
 
         self.output.info("Now in command mode. Enter '-h' for help")
+
 
     def process_cmd_input(self, string):
         pass
@@ -536,8 +544,10 @@ class CursesCLI():
 
                 input_win.addstr(''.join(self.input_buffer))
                 input_win.move(cy, cx)
-            except curses.error as e:
+            except curses.error:
                 pass
+            except Exception:
+                self.output.exception(traceback.format_exc())
             finally:
                 yield from asyncio.sleep(.001)
 
@@ -555,14 +565,16 @@ class CursesCLI():
 
             self.loop.run_until_complete(asyncio.wait(tasks))
             self.loop.run_forever()
-        except KeyboardInterrupt as e:
-            result = 130
-            self.done = True
         finally:
             # let the tasks finish and clean up
-            self.loop.run_until_complete(asyncio.wait(tasks))
-            reset_stdio()
+            if not self.done:
+                self.done = True
+
+            if self.loop.is_running():
+                self.loop.stop()
+
             self.loop.close()
+
             return result
 
     def run(self):
