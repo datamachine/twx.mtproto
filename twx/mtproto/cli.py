@@ -231,7 +231,9 @@ class CLICommand:
         try:
             argv = shlex.split(cmd_str)
             args = self.arg_parser.parse_args(argv)
-            func = self.callbacks.get(argv[0]) if argv else self.default_action
+            func = self.default_action
+            if argv and self.callbacks.get(argv[0]):
+                func = self.callbacks.get(argv[0])
             func(*(self.default_args + args._get_args()), **dict(args._get_kwargs()))
         except CLICommandExit as e:
             pass
@@ -255,6 +257,7 @@ class CursesCLI():
     def __init__(self, config=None):
         super().__init__()
 
+        self.loop = None
         self.command.set_defaults(self)
         self.command.set_error(self.command_error)
         self.command.set_exit(self.command_exit)
@@ -272,7 +275,6 @@ class CursesCLI():
         self.exit_code = 0
         self.ps1_text = 'twx.mtproto$'
         self.cmd_parser = argparse.ArgumentParser(prog='$')
-        self._init_commands()
         self.mode = CursesCLI.COMMAND_MODE
 
     def command_error(self, message):
@@ -289,22 +291,6 @@ class CursesCLI():
     def create_client(self, config):
         self.config = config
         self.client = mtproto.MTProtoClient(config)
-
-    def _init_commands(self):
-        self.cmd_parser.set_defaults(func=lambda: None)
-        subparsers = self.cmd_parser.add_subparsers(title='commands', prog='cmd', metavar='', help='')
-
-        # init
-        init = subparsers.add_parser('init', help='Initialize the MTProto session', description='Initializet the MTProto session')
-        init.set_defaults(func=self.cmd_init)
-
-        # quit
-        quit = subparsers.add_parser('quit', aliases=['exit'], help='Quit the program')
-        quit.set_defaults(func=self.cmd_quit)
-
-        # quit
-        eval_mode = subparsers.add_parser('eval', aliases=['#'], help='switch to eval mode')
-        eval_mode.set_defaults(func=self.cmd_switch_to_eval_mode)
 
     @command('help')
     def main_help(self):
@@ -324,10 +310,13 @@ class CursesCLI():
         else:
             self.output.info('MTProto client has not yet been created')
 
+    @command('quit', aliases=['exit'], help='Quit the program')
     def cmd_quit(self):
         self.output.info('exiting...')
         self.done = True
+        self.loop.stop()
 
+    @command('eval', aliases=['#'], help='switch to eval mode')
     def cmd_switch_to_eval_mode(self):
         ps1_win = self.windows['ps1']
 
@@ -558,22 +547,22 @@ class CursesCLI():
             self.init()
 
             result = 0
-            loop = asyncio.get_event_loop()
+            self.loop = asyncio.get_event_loop()
             tasks = [
                 asyncio.async(self.handle_input()),
                 asyncio.async(self.update_windows()),
             ]
 
-            loop.run_until_complete(asyncio.wait(tasks))
-            loop.run_forever()
+            self.loop.run_until_complete(asyncio.wait(tasks))
+            self.loop.run_forever()
         except KeyboardInterrupt as e:
             result = 130
             self.done = True
         finally:
             # let the tasks finish and clean up
-            loop.run_until_complete(asyncio.wait(tasks))
+            self.loop.run_until_complete(asyncio.wait(tasks))
             reset_stdio()
-            loop.close()
+            self.loop.close()
             return result
 
     def run(self):
