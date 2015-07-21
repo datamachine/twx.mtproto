@@ -99,6 +99,9 @@ class StdioWrapper:
         self.level = level
 
     def write(self, string):
+        if not string.strip():
+            return
+
         log = logging.getLogger('output')
         ts = str(time.time())
         string = string.replace('\n', '\n{}:'.format(ts))
@@ -310,12 +313,9 @@ class CursesCLI():
         for i in iter(range(count)):
             self.output.info(text)
 
-    @command('init')
-    def cmd_init(self):
-        if self.client is not None:
-            self.client.init()
-        else:
-            self.output.info('MTProto client has not yet been created')
+    @command('compare')
+    def cmd_compare(self):
+        self.client.compare()
 
     @command('quit', aliases=['exit'], help='Quit the program')
     def cmd_quit(self):
@@ -479,7 +479,6 @@ class CursesCLI():
             curses.doupdate()
             yield from asyncio.sleep(.001)
 
-    @asyncio.coroutine
     def handle_input(self):
         while not self.done:
             try:
@@ -558,12 +557,14 @@ class CursesCLI():
 
             result = 0
             self.loop = asyncio.get_event_loop()
+
             tasks = [
                 asyncio.async(self.handle_input()),
                 asyncio.async(self.update_windows()),
             ]
 
-            self.loop.run_until_complete(asyncio.wait(tasks))
+            self.client.init(self.loop)
+
             self.loop.run_forever()
         finally:
             # let the tasks finish and clean up

@@ -114,9 +114,7 @@ class Datacenter:
 
         # Handshake
         self.create_auth_key()
-        self.test_api()
-        # print(self.auth_key)
-        # print(self.server_salt)
+        # self.test_api()
 
     def test_api(self):
         getNearestDc = tl.help_getNearestDc()
@@ -137,8 +135,12 @@ class Datacenter:
     def _req_pq(self):
         nonce = tl.int128_c(self.random.getrandbits(128))
         request = tl.req_pq(nonce)
+        # raise Exception()
         self.send_plaintext_message(request.to_bytes())
         res_pq = tl.ResPQ.from_stream(BytesIO(self.recv_plaintext_message()))
+
+        # print(res_pq, ...)
+        raise Exception()
 
         assert nonce == res_pq.nonce
 
@@ -391,7 +393,9 @@ class Datacenter:
 
     def send_tcp_message(self, mproto_message):
         tcp_msg = MTProtoTCPMessage.new(self.number, mproto_message)
-        self.socket.write(tcp_msg.to_bytes())
+        tcp_msg_data = tcp_msg.to_bytes()
+        print(to_hex(tcp_msg_data))
+        self.socket.write(tcp_msg_data)
         self.number += 1
 
     def recv_tcp_message(self):
@@ -553,7 +557,7 @@ class MTProtoTCPMessage(namedtuple('MTProtoTCPMessage', 'data')):
 
 class MTProtoClient:
 
-    def __init__(self, config, session_id=None, use_test_dc=True):
+    def __init__(self, config, session_id=None):
 
         self.api_id = config.get('app', 'api_id')
         self.api_hash = config.get('app', 'api_hash')
@@ -565,12 +569,12 @@ class MTProtoClient:
         self.test_dc = dc.DataCenter(config.get('servers', 'test_dc'))
         self.productinon_dc = dc.DataCenter(config.get('servers', 'production_dc'))
 
-        self.use_test_dc = use_test_dc
+        # if self.use_test_dc:
+        self.datacenter = self.test_dc
+        # else:
+        #     self.datacenter = self.productinon_dc
 
-        if self.use_test_dc:
-            self.datacenter = self.test_dc
-        else:
-            self.datacenter = self.productinon_dc
+        # self.datacenter = dc.DataCenter('tcp://127.0.0.1:8888')
 
         if session_id is None:
             self.session = MTProtoSession.new()
@@ -579,6 +583,25 @@ class MTProtoClient:
             self.session = MTProtoSession(session_id)
             print('continuing session: {}'.format(self.session))
 
-    def init(self):
-        print('establishing connection...')
-        self.datacenter.establish_connection()
+    @asyncio.coroutine
+    def run(self, loop):
+        while True:
+            # self.get_nearest_dc()
+            yield from asyncio.sleep(1)
+
+    def compare(self):
+        MTProto('FFFFFFFFF', 'EEEEEEEE', self.public_keys)
+
+    def init(self, loop):
+        # MTProto('FFFFFFFFF', 'EEEEEEEE', self.public_keys)
+        asyncio.async(self.run(loop))
+        self.datacenter.init(loop)
+
+    # def add_to_run_loop(self, loop):
+    #     from . connection import MTProtoConnection
+
+    #     self.conn = MTProtoConnection('TCP')
+    #     coro = loop.create_connection(lambda: self.conn, '127.0.0.1', 8888)
+
+    #     loop.run_until_complete(coro)
+    #     loop.run_until_complete(self.run())
