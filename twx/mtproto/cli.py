@@ -18,10 +18,12 @@ from configparser import ConfigParser
 import asyncio
 import shlex
 
+import inspect
+from functools import wraps
 from enum import Enum
 import locale
 import curses
-from functools import partial
+from functools import partial, partialmethod
 from io import StringIO, StringIO
 import time
 
@@ -156,8 +158,94 @@ class Window:
         self.position = Position(position)
         self.ref = ReferenceBorder(ref)
 
+class CLICommandExit(Exception):
+    pass
 
-class CursesCLI:
+class CLICommandError(Exception):
+    pass
+
+class CLICommand:
+
+    def exit(self, status, message):
+        if callable(self._exit_cb):
+            self._exit_cb(status, message)
+        raise CLICommandExit()
+
+    def error(self, message):
+        if callable(self._error_cb):
+            self._error_cb(message)
+        raise CLICommandError()
+
+    def __init__(self, *args, **kwargs):
+        self.arg_parser = argparse.ArgumentParser(*args, **kwargs)
+        setattr(self.arg_parser, 'exit', self.exit)
+        setattr(self.arg_parser, 'error', self.error)
+
+        self._error_cb = None
+        self._exit_cb = None
+
+        self.default_args = []
+
+        self.callbacks = dict()
+        self.default_action = CLICommand._default
+
+        self.sub_parsers = self.arg_parser.add_subparsers(title='commands', metavar='')
+        self._sub_parser_stack = list()
+
+    def __call__(self, name, *args, **kwargs):
+        if 'help' not in kwargs:
+            kwargs['help'] = ' '.join(list(args) + [str(item) for item in kwargs.items()])
+        self._sub_parser_stack.append(self.sub_parsers.add_parser(name, *args, **kwargs))
+
+        def wrapper(func):
+            self.callbacks[name] = func
+            del self._sub_parser_stack[-1]
+            return func
+
+        return wrapper
+
+    def set_exit(self, exit):
+        self._exit_cb = exit
+
+    def set_error(self, error):
+        self._error_cb = error
+
+    def set_defaults(self, *args, **kwargs):
+        self.default_args = list(args)
+        self.arg_parser.set_defaults(**kwargs)
+
+    def _default(*argv, **kwargs):
+        pass
+
+    def set_default(self, default):
+        self.default_action = default
+
+    def argument(self, *args, **kwargs):
+        self._sub_parser_stack[-1].add_argument(*args, **kwargs)
+
+        def wrapper(func):
+            return func
+        return wrapper
+
+    def run_cmd(self, cmd_str):
+        try:
+            argv = shlex.split(cmd_str)
+            args = self.arg_parser.parse_args(argv)
+            func = self.callbacks.get(argv[0]) if argv else self.default_action
+            func(*(self.default_args + args._get_args()), **dict(args._get_kwargs()))
+        except CLICommandExit as e:
+            pass
+        except CLICommandError as e:
+            pass
+        except SystemExit:
+            pass
+
+    def exit(self, status=0, message=None):
+        raise CLICommandExit()
+
+
+class CursesCLI():
+    command = CLICommand(add_help=False)
 
     _InputMode = Enum('InputMode', 'COMMAND_MODE EVAL_MODE')
 
@@ -165,6 +253,12 @@ class CursesCLI:
     EVAL_MODE = _InputMode.EVAL_MODE
 
     def __init__(self, config=None):
+        super().__init__()
+
+        self.command.set_defaults(self)
+        self.command.set_error(self.command_error)
+        self.command.set_exit(self.command_exit)
+
         self.done = False
 
         self.windows = OrderedDict()
@@ -181,6 +275,13 @@ class CursesCLI:
         self._init_commands()
         self.mode = CursesCLI.COMMAND_MODE
 
+    def command_error(self, message):
+        self.output.error(message)
+        self.output.error(self.command.arg_parser.format_usage())
+
+    def command_exit(self, status, message):
+        self.output.error(message)
+
     @property
     def output(self):
         return logging.getLogger('output')
@@ -192,12 +293,6 @@ class CursesCLI:
     def _init_commands(self):
         self.cmd_parser.set_defaults(func=lambda: None)
         subparsers = self.cmd_parser.add_subparsers(title='commands', prog='cmd', metavar='', help='')
-
-        # echo
-        echo = subparsers.add_parser('echo')
-        echo.add_argument('text')
-        echo.add_argument('--count', type=int, default=1)
-        echo.set_defaults(func=self.cmd_echo)
 
         # init
         init = subparsers.add_parser('init', help='Initialize the MTProto session', description='Initializet the MTProto session')
@@ -211,10 +306,18 @@ class CursesCLI:
         eval_mode = subparsers.add_parser('eval', aliases=['#'], help='switch to eval mode')
         eval_mode.set_defaults(func=self.cmd_switch_to_eval_mode)
 
+    @command('help')
+    def main_help(self):
+        self.output.info(self.command.arg_parser.format_help())
+
+    @command('echo')
+    @command.argument('text')
+    @command.argument('--count', type=int, default=1)
     def cmd_echo(self, text, count):
         for i in iter(range(count)):
             self.output.info(text)
 
+    @command('init')
     def cmd_init(self):
         if self.client is not None:
             self.client.init()
@@ -246,17 +349,18 @@ class CursesCLI:
         self.output.info("Now in command mode. Enter '-h' for help")
 
     def process_cmd_input(self, string):
-        cmd = shlex.split(string)
-        try:
-            args = self.cmd_parser.parse_args(cmd)
-        except SystemExit:
-            return
+        pass
+        # cmd = shlex.split(string)
+        # try:
+        #     args = self.cmd_parser.parse_args(cmd)
+        # except SystemExit:
+        #     return
 
-        func = args.func
-        kwargs = dict(args._get_kwargs())
-        del kwargs['func']
+        # func = args.func
+        # kwargs = dict(args._get_kwargs())
+        # del kwargs['func']
 
-        func(**kwargs)
+        # func(**kwargs)
 
     def process_eval_input(self, string):
         if string.strip() == '$':
@@ -387,6 +491,7 @@ class CursesCLI:
                 key = input_win.getkey()
 
                 if key == '\n':
+                    # self.output.debug(command.format_usage())
                     string = ''.join(self.input_buffer).strip()
 
                     if string.strip():
@@ -397,7 +502,8 @@ class CursesCLI:
 
                     self.input_buffer = list()
                     input_win.clear()
-                    self.process_input(string)
+                    self.command.run_cmd(string)
+                    # self.process_input(string)
                 elif key == '\x7f':
                     cy, cx = input_win.getyx()
                     if 0 < cx <= len(self.input_buffer):
