@@ -52,11 +52,10 @@ msg_new_detailed_info#809db6df answer_msg_id:long bytes:int status:int = MsgDeta
 """
 
 con_template="""
-{name} = create_constructor(
-    name='{name}', number={number},
+{name} = BareType(name='{name}', number={number},
     params=[{params}],
     param_types=[{param_types}],
-    result_type={result_type})
+    result='{result_type}')
 """
 
 from collections import OrderedDict

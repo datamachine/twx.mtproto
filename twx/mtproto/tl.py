@@ -20,6 +20,10 @@ log = logging.getLogger(__name__)
 ---types---
 """
 
+
+
+
+
 def encoded_combinator_number(data):
     """
     converts a string represenation of a combinator into a bytes represenation of its number
@@ -466,9 +470,6 @@ class resPQ_c(TLConstructor, ResPQ):
 
 ResPQ.add_constuctor(resPQ_c)
 
-    #def from_stream(self, stream):
-    #    nonce 
-
 
 class P_Q_inner_data(TLType):
     constructors = {}
@@ -481,7 +482,7 @@ p_q_inner_data_c = create_constructor(
     result_type=P_Q_inner_data)
 
 
-class Server_DH_Params(TLType, namedtuple('Server_DH_Params', 
+class Server_DH_Params(TLType, namedtuple('Server_DH_Params',
     ['nonce', 'server_nonce', 'new_nonce_hash', 'encrypted_answer'])):
     constructors = {}
 

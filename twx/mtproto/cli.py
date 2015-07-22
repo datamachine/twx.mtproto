@@ -9,6 +9,8 @@ import os
 import io
 import traceback
 
+import twx
+
 sys.path.insert(0, os.getcwd())
 
 import argparse
@@ -441,6 +443,10 @@ class CursesCLI():
         output = logging.getLogger('output')
         output.addHandler(window_handler)
         output.setLevel(logging.DEBUG)
+
+        connection_log = logging.getLogger(twx.mtproto.connection.__name__)
+        connection_log.addHandler(window_handler)
+        connection_log.setLevel(logging.DEBUG)
 
         cy, cx = output_win.getmaxyx()
         self.windows['separator'] = root_win.derwin(1, cx, cy, 0)

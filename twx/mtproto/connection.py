@@ -12,7 +12,6 @@ from . util import crc32, to_hex
 from . import tl
 
 log = logging.getLogger(__name__)
-log.propagate = True
 
 class MTProtoConnection:
 
@@ -45,10 +44,9 @@ class MTProtoConnection:
 
     def received_mtproto_data(self, mtp_msg):
         response = tl.TLType.from_stream(BytesIO(mtp_msg.message_data))
-        print('    content: {}'.format(response))
+        log.debug('    content: {}'.format(response))
 
         self.received_messages[mtp_msg.message_id] = response
-        # print(self.received_messages)
 
     @asyncio.coroutine
     def get_message(self, message_id):
@@ -61,38 +59,34 @@ class MTProtoConnection:
 
     def send_insecure_message(self, message_id, request):
         # package message, not chat message
-        print('sending request:'
-              '\n    message_id: {}'
-              '\n    request:    {}'.format(message_id, request))
+        log.debug('sending request:'
+                  '\n    message_id: {}'
+                  '\n    request:    {}'.format(message_id, request))
         msg = MTProtoUnencryptedMessage.new(message_id, request)
 
         self.send_message(msg)
-        # print(dir(self.transport), ...)
-        # print(to_hex(self.transport.read(1024)))
 
 
 class MTProtoTCPConnection(asyncio.Protocol, MTProtoConnection):
 
     def connection_made(self, transport):
-        print('connection made')
+        log.debug('connection made')
         self.transport = transport
 
     def data_received(self, data):
-        print('received data:')
+        log.debug('received data:')
         tcp_msg = MTProtoTCPMessage.from_bytes(data)
-        print('    crc_ok:  {}'.format(tcp_msg.crc_ok()))
+        log.debug('    crc_ok:  {}'.format(tcp_msg.crc_ok()))
         mtp_msg = MTProtoMessage.from_tcp_msg(tcp_msg)
         self.received_mtproto_data(mtp_msg)
 
     def connection_lost(self, exc):
-        print('The server closed the connection')
+        log.debug('The server closed the connection')
 
     def send_message(self, mtproto_msg):
         tcp_msg = MTProtoTCPMessage.new(self.seq_no, mtproto_msg)
         tcp_msg_data = tcp_msg.to_bytes()
-        # print('tcp_msg_data:', to_hex(tcp_msg_data))
         self.transport.write(tcp_msg_data)
-        # self.transport.close()
 
 class MTProtoTCPMessage(namedtuple('MTProtoTCPMessage', 'data')):
 
