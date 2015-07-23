@@ -74,27 +74,6 @@ class MTProtoConnection:
         self.send_message(msg)
 
 
-class MTProtoTCPConnection(asyncio.Protocol, MTProtoConnection):
-
-    def connection_made(self, transport):
-        log.debug('connection made')
-        self.transport = transport
-
-    def data_received(self, data):
-        log.debug('received data:')
-        tcp_msg = MTProtoTCPMessage.from_bytes(data)
-        log.debug('    crc_ok:  {}'.format(tcp_msg.crc_ok()))
-        mtp_msg = MTProtoMessage.from_tcp_msg(tcp_msg)
-        self.received_mtproto_data(mtp_msg)
-
-    def connection_lost(self, exc):
-        log.debug('The server closed the connection')
-
-    def send_message(self, mtproto_msg):
-        tcp_msg = MTProtoTCPMessage.new(self.seq_no, mtproto_msg)
-        tcp_msg_data = tcp_msg.to_bytes()
-        self.transport.write(tcp_msg_data)
-
 class MTProtoTCPMessage(namedtuple('MTProtoTCPMessage', 'data')):
 
     @classmethod
