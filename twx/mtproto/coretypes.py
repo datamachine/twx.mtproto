@@ -37,12 +37,12 @@ class BareType:
 
     def __new__(cls, *args, **kwargs):
         if cls is BareType:
-            return cls._bare_type_factory(*args, **kwargs)
+            return cls._type_factory(*args, **kwargs)
 
         return cls.new(*args, **kwargs)
 
-    @staticmethod
-    def _bare_type_factory(name, number, params, param_types, result_type):
+    @classmethod
+    def _type_factory(cls, name, number, params, param_types, result_type):
         param_tuple = namedtuple(name, params)
         param_types = param_tuple(*param_types)
 
@@ -51,10 +51,8 @@ class BareType:
             param_types=param_types,
             )
 
-        bare_type = type(name, (BareType, param_tuple, result_type,), attrs)
-        result_type._constructors[bare_type.number] = bare_type
-        return bare_type
-
+        return type(name, (cls, param_tuple, result_type,), attrs)
+        
     @classmethod
     def new(cls, *args, **kwargs):
         
@@ -126,6 +124,15 @@ class BoxedType:
     def buffers(self):
         return self.number.buffers() + super().buffers()
 
+class Function(BareType):
+
+    def __new__(cls, *args, **kwargs):
+        if cls is Function:
+            return cls._type_factory(*args, **kwargs)
+        return cls.new(*args, **kwargs)
+
+    def buffers(self):
+        return self.number.buffers() + super().buffers()
 
 class int_c(int):
 

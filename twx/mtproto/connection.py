@@ -10,6 +10,7 @@ import time
 
 from . util import crc32, to_hex
 from . import tl
+from . import scheme
 
 log = logging.getLogger(__name__)
 
@@ -220,7 +221,7 @@ class MTProtoUnencryptedMessage(MTProtoMessage,
 
     @classmethod
     def new(cls, message_id, message_data):
-        message_data = message_data.to_bytes()
+        message_data = message_data.get_bytes()
         return cls.__new__(cls, 0, message_id, len(message_data), message_data)
 
         result = cls.__new__(cls)

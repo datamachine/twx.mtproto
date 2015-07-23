@@ -376,9 +376,12 @@ msg_detailed_info_c = BareType(name='msg_detailed_info_c', number=0x276d3ec6,
 req_pq#60469778 nonce:int128 = ResPQ
 """
 
-# req_pq = BareType(name='req_pq', number=0x60469778
-#     params=(),
-#     )
+req_pq = Function(name='req_pq', number=0x60469778,
+    params=('nonce',),
+    param_types=(int128_c,),
+    result_type=ResPQ)
+
+# req_pq = BoxedType('req_pq', req_pq)
 
 # req_DH_params#d712e4be nonce:int128 server_nonce:int128 p:bytes q:bytes public_key_fingerprint:long encrypted_data:bytes = Server_DH_Params;
 
@@ -406,3 +409,7 @@ if __name__ == '__main__':
     print(ResPQ_test.hex_list())
     print(ResPQ_test.get_bytes())
     print()
+
+    req_pq_test = req_pq(1)
+    print(req_pq_test)
+    print(req_pq_test.hex_list())

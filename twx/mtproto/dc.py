@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 from struct import Struct
 
 from . import tl
+from . import scheme
 from . connection import MTProtoConnection
 from time import time
 
@@ -58,7 +59,7 @@ class DataCenter:
         self.conn.send_insecure_message(self.generate_message_id(), request)
 
     def create_auth_key(self):
-        req_pq = tl.req_pq(tl.int128_c(self.random.getrandbits(128)))
+        req_pq = scheme.req_pq(self.random.getrandbits(128))
         self.send_insecure_message(req_pq)
         # res_pq = tl.ResPQ.from_stream(BytesIO(self.recv_plaintext_message()))
 
