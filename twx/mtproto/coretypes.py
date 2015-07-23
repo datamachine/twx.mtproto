@@ -89,15 +89,20 @@ class BoxedType:
     def __new__(cls, *args, **kwargs):
         if cls is BoxedType:
             return cls._get_base_boxed_type(*args, **kwargs)
-        elif not isinstance(cls, tuple):
-            return cls._get_boxed_type(*args, **kwargs)
-        else:
-            return cls.new(*args, **kwargs)
-        # boxed_type = cls._get_boxed_type(type(bare_obj))
+
+        boxed_type = cls._get_boxed_type(*args, **kwargs)
+        return boxed_type.new(*args, **kwargs)
 
     @classmethod
     def new(cls, iterable):
         return tuple.__new__(cls, iterable)
+
+    @classmethod
+    def _boxed_base_type_factory(cls, name, base_type):
+        attrs = dict(
+            name=name
+            )
+        return type(name, (cls, base_type,), attrs)
 
     @classmethod
     def _get_base_boxed_type(cls, name, base_type):
@@ -107,11 +112,8 @@ class BoxedType:
         return base_boxed_type
 
     @classmethod
-    def _boxed_base_type_factory(cls, name, base_type):
-        return type(name, (cls, base_type,), dict(name=name))
-
-    @classmethod
-    def _get_boxed_type(cls, bare_type):
+    def _get_boxed_type(cls, obj):
+        bare_type = type(obj)
         boxed_type = cls._boxed_types.get(bare_type)
         if boxed_type is None:
             boxed_type = cls._boxed_types.setdefault(bare_type, cls._boxed_type_factory(bare_type))
@@ -254,12 +256,12 @@ class vector_c(namedtuple('vector_c', 't num items'), BareType):
     def __new__(cls, *args, **kwargs):
         if cls is vector_c:
             return cls.get_vector_type(*args, **kwargs)
-        print('__new__:', cls, *args, **kwargs)
         return cls.new(*args, **kwargs)
 
     @classmethod
     def new(cls, items):
-        return tuple.__new__(cls, (cls._item_type, len(items), tuple(items),))
+        items = tuple(map(cls._item_type, items))
+        return tuple.__new__(cls, (cls._item_type, len(items), items,))
 
     @classmethod
     def get_vector_type(cls, item_type):

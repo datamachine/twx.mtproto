@@ -371,5 +371,13 @@ msg_detailed_info_c = BareType(name='msg_detailed_info_c', number=0x276d3ec6,
 MsgDetailedInfo = BoxedType('MsgDetailedInfo', MsgDetailedInfo_t)
 
 if __name__ == '__main__':
-    res_pq = resPQ_c(1, 2, b'test1', [10, 20, 30, 40, 50])
-    print(res_pq)
+    res_pq_test = resPQ_c(1, 2, b'test1', [10, 20, 30, 40, 50])
+    print(res_pq_test)
+    print(res_pq_test.hex_list())
+    print(res_pq_test.get_bytes())
+    print()
+
+    ResPQ_test = ResPQ(res_pq_test)
+    print(ResPQ_test)
+    print(ResPQ_test.hex_list())
+    print(ResPQ_test.get_bytes())
