@@ -51,17 +51,20 @@ msg_detailed_info#276d3ec6 msg_id:long answer_msg_id:long bytes:int status:int =
 msg_new_detailed_info#809db6df answer_msg_id:long bytes:int status:int = MsgDetailedInfo;
 """
 
-header_template = '"""\n{header}\n"""'
-
 bare_type_template = """\
 {name} = BareType(name='{name}', number={number},
     params=[{params}],
     param_types=[{param_types}],
-    result='{result_type}_type')
+    result_type={result_type}_type)
 """
 
 boxed_type_template = """\
-{result_type} = BoxedType.new('{result_type}', '{result_type}_type')
+{result_type} = BoxedType.new('{result_type}', {result_type}_type)
+"""
+
+type_template = """
+class {}_type:
+    _constructors = dict()
 """
 
 from collections import OrderedDict, namedtuple
@@ -122,7 +125,7 @@ for raw_con in TL_CONSTRUCTORS.split(';')[:-2]:
             param_type = '{}_c'.format(param_type)
 
         if param_type == 'Object':
-            param_type = 'TLType'
+            param_type = 'object'
 
         params.append(param)
         param_types.append(param_type)
@@ -156,6 +159,8 @@ for result_type, bares in bare_types.items():
     for bare_type in bares:
         print(bare_type.header)
     print('"""')
+
+    print(type_template.format(result_type))
 
     for bare_type in bares:
         print(bare_type.definition)

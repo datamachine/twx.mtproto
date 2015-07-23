@@ -3,7 +3,7 @@ from collections import UserList
 from struct import Struct
 from functools import partial
 
-from . util import crc32
+from util import crc32
 
 class MTProtoKeyNotReadyError(Exception):
     pass
@@ -23,7 +23,6 @@ def generate_number(string):
 
 
 class BareType:
-    result_types = {}
 
     def __new__(cls, *args, **kwargs):
         if cls is BareType:
@@ -32,18 +31,16 @@ class BareType:
         return cls._make(*args, **kwargs)
 
     @staticmethod
-    def _type_factory(name, number, params, param_types, result):
+    def _type_factory(name, number, params, param_types, result_type):
         param_tuple = namedtuple(name, params)
         param_types = param_tuple(*param_types)
-
-        result_type = BareType.result_types.setdefault(result, type(result, (), dict(_constructors={})))
 
         attrs = dict(
             number=int_c(number),
             param_types=param_types,
             )
 
-        bare_type = type(name, (BareType, result_type, param_tuple), attrs)
+        bare_type = type(name, (BareType, param_tuple, result_type,), attrs)
         result_type._constructors[bare_type.number] = bare_type
         return bare_type
 
@@ -89,7 +86,7 @@ class BoxedType:
 
     @staticmethod
     def _boxed_base_type_factory(name, result_type):
-        return BoxedType._base_boxed_types.setdefault(name, type(name, (BoxedType, BareType.result_types[result_type],), dict(name=name)))
+        return BoxedType._base_boxed_types.setdefault(name, type(name, (BoxedType, result_type,), dict(name=name)))
 
     @classmethod
     def _get_boxed_type(cls, bare_type):
