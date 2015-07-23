@@ -7,10 +7,16 @@ from collections import namedtuple
 from urllib.parse import urlsplit
 from struct import Struct
 
-from . import tl
-from . import scheme
-from . connection import MTProtoConnection
 from time import time
+
+try:
+    from . import tl
+    from . import scheme
+    from . connection import MTProtoConnection, TCPConnection
+except SystemError:
+    import tl
+    import scheme
+    from connection import MTProtoConnection, TCPConnection
 
 log = logging.getLogger(__name__)
 
@@ -27,24 +33,25 @@ class DCInfo(namedtuple('DCInfo', 'address port connection_type')):
 class DataCenter:
 
     def __init__(self, url):
-        self.dc_info = DCInfo.new(url)
-        self.conn = None
-        self.conn_coro = None
+        self.dc = DCInfo.new(url)
+        self.connection = TCPConnection(str(self.dc.address), self.dc.port)
         self.last_msg_id = 0
         self.auth_key = None
         self.random = random.SystemRandom()
 
     def init(self, loop):
-        self.conn = MTProtoConnection.new(self.dc_info.connection_type)
-        self.conn_coro = loop.create_connection(lambda: self.conn, str(self.dc_info.address), self.dc_info.port)
+        pass
+        # self.conn = MTProtoConnection.new(self.dc_info.connection_type)
+        # self.conn_coro = loop.create_connection(lambda: self.conn, str(self.dc_info.address), self.dc_info.port)
 
-        f1 = asyncio.async(self.conn_coro)
-        asyncio.async(self.run(loop))
-        f1.add_done_callback(lambda x: self.create_auth_key())
+        # f1 = asyncio.async(self.conn_coro)
+        # asyncio.async(self.run(loop))
+        # f1.add_done_callback(lambda x: self.create_auth_key())
         # loop.run_until_complete(asyncio.wait(tasks))
 
     def send_rpc_message(self, msg):
-        self.conn.send_message(msg)
+        pass
+        # self.conn.send_message(msg)
     
     def generate_message_id(self):
         msg_id = int(time() * 2**32)
@@ -55,18 +62,34 @@ class DataCenter:
 
         return msg_id
 
+    @asyncio.coroutine
     def send_insecure_message(self, request):
-        self.conn.send_insecure_message(self.generate_message_id(), request)
+        yield from self.connection.send_insecure_message(self.generate_message_id(), request)
+        # self.conn.send_insecure_message(self.generate_message_id(), request)
 
+    @asyncio.coroutine
     def create_auth_key(self):
-        req_pq = scheme.req_pq(self.random.getrandbits(128))
-        self.send_insecure_message(req_pq)
+        req_pq = scheme.req_pq(tl.int128_c(self.random.getrandbits(128)))
+        yield from self.send_insecure_message(req_pq)
         # res_pq = tl.ResPQ.from_stream(BytesIO(self.recv_plaintext_message()))
 
         # assert nonce == res_pq.nonce
 
     @asyncio.coroutine
     def run(self, loop):
+        asyncio.async(self.connection.run(loop), loop=loop)
+        asyncio.async(self.create_auth_key(), loop=loop)
+
         while True:
-            yield from asyncio.sleep(1)
+            print('test')
+            yield from asyncio.sleep(10)
+
+if __name__ == '__main__':
+
+    dc = DataCenter('tcp://149.154.167.40:443')
+
+    loop = asyncio.get_event_loop()
+    asyncio.async(dc.run(loop), loop=loop)
+    loop.run_forever()
+    loop.close()
 

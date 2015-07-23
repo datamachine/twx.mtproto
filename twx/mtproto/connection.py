@@ -8,9 +8,15 @@ from collections import namedtuple
 from io import BytesIO
 import time
 
-from . util import crc32, to_hex
-from . import tl
-from . import scheme
+try:
+    from . util import crc32, to_hex
+    from . import tl
+    from . import scheme
+except SystemError:
+    from util import crc32, to_hex
+    import tl
+    import scheme
+
 
 log = logging.getLogger(__name__)
 
@@ -93,13 +99,17 @@ class MTProtoTCPMessage(namedtuple('MTProtoTCPMessage', 'data')):
 
     @classmethod
     def new(cls, seq_no, mtproto_msg):
-        payload = mtproto_msg.to_bytes()
+        payload = mtproto_msg.get_bytes()
+        # print('payload:', payload)
+        # print(to_hex(scheme.int32_c(len(payload) + 12).get_bytes()))
+
         header_and_payload = bytes().join([
-            int.to_bytes(len(payload) + 12, 4, 'little'),
-            int.to_bytes(seq_no, 4, 'little'),
+            scheme.int32_c(len(payload) + 12).get_bytes(),
+            scheme.int32_c(seq_no).get_bytes(),
             payload
             ])
-        crc = tl.int_c._to_bytes(crc32(header_and_payload))
+
+        crc = scheme.int32_c(crc32(header_and_payload)).get_bytes()
 
         return cls(header_and_payload + crc)
 
@@ -208,6 +218,10 @@ class MTProtoEncryptedMessage(namedtuple('MTProtoEncryptedMessage',
     def to_bytes(self):
         return b''.join((self.auth_key_id, self.msg_key, self.encrypted_data,))
 
+class EmptyValue:
+
+    def __new__(cls):
+        raise SyntaxError()
 
 class MTProtoUnencryptedMessage(MTProtoMessage,
     namedtuple('MTProtoUnencryptedMessage', 'auth_key_id message_id message_data_length message_data')):
@@ -221,12 +235,19 @@ class MTProtoUnencryptedMessage(MTProtoMessage,
 
     @classmethod
     def new(cls, message_id, message_data):
-        message_data = message_data.get_bytes()
-        return cls.__new__(cls, 0, message_id, len(message_data), message_data)
+        return cls.__new__(cls, scheme.int64_c(0), scheme.int64_c(message_id), EmptyValue, message_data)
 
-        result = cls.__new__(cls)
-        result.data = cls._header_struct.pack(0, message_id, len(message_data)) + message_data
-        return result
+    def buffers(self):
+        message_data = self.message_data.buffers()
+        message_data_length = scheme.int32_c(sum([len(data) for data in message_data]))
+        # message_data_length = scheme.int32_c(message_data_length)
+        return self.auth_key_id.buffers() + self.message_id.buffers() + message_data_length.buffers() + message_data
+
+    def hex_list(self):
+        return [to_hex(buf, 0) for buf in self.buffers()]
+
+    def get_bytes(self):
+        return b''.join(self.buffers())
 
     @classmethod
     def from_tcp_msg(cls, tcp_msg):
@@ -237,5 +258,56 @@ class MTProtoUnencryptedMessage(MTProtoMessage,
         auth_key_id, message_id, message_data_length = cls._header_struct.unpack(data[0:20])
         return cls(auth_key_id, message_id, message_data_length, data[20:])
 
-    def to_bytes(self):
-        return self._header_struct.pack(self.auth_key_id, self.message_id, self.message_data_length) + self.message_data
+class TCPConnection:
+
+    def __init__(self, host, port):
+        self.queue = None
+        self.host = host
+        self.port = port
+
+    @asyncio.coroutine
+    def run(self, loop):
+        self.queue = asyncio.Queue(loop=loop)
+        reader, writer = yield from asyncio.open_connection(self.host, self.port, loop=loop)
+
+        seq_no = 0
+
+        while True:
+            data = yield from self.queue.get()
+            print(data.hex_list())
+
+            tcp_msg = MTProtoTCPMessage.new(seq_no, data)
+            print(tcp_msg)
+            writer.write(tcp_msg.data)
+            yield from writer.drain()
+
+            rec_data_length_bytes = yield from reader.read(4)
+            rcv_data_length = int.from_bytes(rec_data_length_bytes, 'little')
+            
+            rcv_data = yield from reader.read(rcv_data_length - 4)
+            rcv_msg = MTProtoTCPMessage.from_bytes(rec_data_length_bytes + rcv_data)
+            print(rcv_msg)
+
+            yield from asyncio.sleep(1)
+
+    @asyncio.coroutine
+    def debug(self, loop):
+        while True:
+            print(self.queue.qsize())
+            yield from asyncio.sleep(1)
+
+    @asyncio.coroutine
+    def send_insecure_message(self, message_id, obj):
+        mtproto_msg = MTProtoUnencryptedMessage.new(message_id, obj)
+        yield from self.queue.put(mtproto_msg)
+
+
+if __name__ == '__main__':
+    con = TCPConnection('127.0.0.1', 8888)
+
+    loop = asyncio.get_event_loop()
+    asyncio.async(con.run(loop))
+    asyncio.async(con.debug(loop))
+
+    loop.run_forever()
+    loop.close()

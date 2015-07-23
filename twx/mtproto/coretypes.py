@@ -146,7 +146,11 @@ class int_c(int):
     _struct = Struct('<I')
 
     def buffers(self):
-        return [int_c._struct.pack(self)]
+        return [self.get_bytes()]
+
+    def get_bytes(self):
+        return int_c._struct.pack(self)
+
 int_c.number = generate_number(int_c.number)
 
 int32_c = int_c  # alias for general utility

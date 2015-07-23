@@ -5,7 +5,10 @@ from enum import Enum
 from collections import OrderedDict, UserList
 from struct import Struct
 
-from . util import to_hex, crc32
+try:
+    from . util import to_hex, crc32
+except SystemError:
+    from util import to_hex, crc32
 
 import sys
 
@@ -283,7 +286,6 @@ class Vector(UserList, TLType):
                 name = '{}_{}'.format(cls.__name__, vector_item_cls.__name__)
                 Vector._vector_types[key] = type(name, (cls,), {'_item_cls_':vector_item_cls})
                 vector_cls = Vector._vector_types.get(key)
-                print('creating new vector type {}'.format(vector_cls))
             return vector_cls
         else:
             return object.__new__(cls)
