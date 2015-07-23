@@ -3,7 +3,10 @@ from collections import UserList
 from struct import Struct
 from functools import partial
 
-from util import crc32
+try:
+    from . util import crc32
+except SystemError:
+    from util import crc32
 
 class MTProtoKeyNotReadyError(Exception):
     pass
