@@ -1,8 +1,9 @@
 from collections import namedtuple
 from collections import UserList
 from struct import Struct
-from util import crc32
 from functools import partial
+
+from . util import crc32
 
 class MTProtoKeyNotReadyError(Exception):
     pass
@@ -35,14 +36,16 @@ class BareType:
         param_tuple = namedtuple(name, params)
         param_types = param_tuple(*param_types)
 
-        result_type = BareType.result_types.setdefault(result, type(result, (BareType,), dict()))
+        result_type = BareType.result_types.setdefault(result, type(result, (), dict(_constructors={})))
 
         attrs = dict(
             number=int_c(number),
-            param_types=param_types
+            param_types=param_types,
             )
 
-        return type(name, (result_type, param_tuple,), attrs)
+        bare_type = type(name, (BareType, result_type, param_tuple), attrs)
+        result_type._constructors[bare_type.number] = bare_type
+        return bare_type
 
     @classmethod
     def _make(cls, *args, **kwargs):
@@ -70,22 +73,31 @@ class BareType:
         """ returns of strings list of all individual elements converted to bytes and formatted in hex """
         return [''.join(['{:02X}'.format(b) for b in data]) for data in self.buffers()]
 
-
 class BoxedType:
 
-    def __new__(cls, *args, **kwargs):
-        if cls is BoxedType:
-            return cls._type_factory(cls, *args, **kwargs)
+    _base_boxed_types = {}
+    _boxed_types = {}
 
-        return cls._make(*args, **kwargs)
+    def __new__(cls, bare_obj):
+        boxed_type = cls._get_boxed_type(type(bare_obj))
+
+        return tuple.__new__(boxed_type, bare_obj)
 
     @staticmethod
-    def _type_factory(cls, name, bare_type):
-        attrs = dict(
-            bare_type=bare_type
-            )
+    def new(name, result_type):
+        return BoxedType._boxed_base_type_factory(name, result_type)
 
-        return type(name, (BoxedType, bare_type,), attrs)
+    @staticmethod
+    def _boxed_base_type_factory(name, result_type):
+        return BoxedType._base_boxed_types.setdefault(name, type(name, (BoxedType, BareType.result_types[result_type],), dict(name=name)))
+
+    @classmethod
+    def _get_boxed_type(cls, bare_type):
+        return cls._boxed_types.setdefault(bare_type.number, cls._boxed_type_factory(bare_type))
+
+    @classmethod
+    def _boxed_type_factory(cls, bare_type):
+        return type(cls.name, (cls, bare_type,), dict())
 
     def buffers(self):
         return self.number.buffers() + super().buffers()

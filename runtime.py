@@ -51,16 +51,24 @@ msg_detailed_info#276d3ec6 msg_id:long answer_msg_id:long bytes:int status:int =
 msg_new_detailed_info#809db6df answer_msg_id:long bytes:int status:int = MsgDetailedInfo;
 """
 
-con_template="""
+header_template = '"""\n{header}\n"""'
+
+bare_type_template = """\
 {name} = BareType(name='{name}', number={number},
     params=[{params}],
     param_types=[{param_types}],
-    result='{result_type}')
+    result='{result_type}_type')
 """
 
-from collections import OrderedDict
+boxed_type_template = """\
+{result_type} = BoxedType.new('{result_type}', '{result_type}_type')
+"""
 
-cons = OrderedDict()
+from collections import OrderedDict, namedtuple
+
+ConInfo = namedtuple('ConData', 'result_type header definition')
+
+bare_types = OrderedDict()
 
 for raw_con in TL_CONSTRUCTORS.split(';')[:-2]:
     con_iter = iter(raw_con.split())
@@ -84,9 +92,6 @@ for raw_con in TL_CONSTRUCTORS.split(';')[:-2]:
     result_type = next(con_iter)
     if result_type == 'Object':
         result_type = 'TLType'
-
-    if result_type not in cons:
-        cons[result_type] = list()
 
     try:
         next(con_iter)
@@ -124,7 +129,9 @@ for raw_con in TL_CONSTRUCTORS.split(';')[:-2]:
 
     assert len(params) == len(param_types)
 
-    create_con = con_template.format(
+    header = raw_con.strip()
+
+    bare_type = bare_type_template.format(
         name=name,
         number=number,
         params=', '.join([repr(p) for p in params]),
@@ -132,16 +139,35 @@ for raw_con in TL_CONSTRUCTORS.split(';')[:-2]:
         result_type=result_type
         )
 
-    cons[result_type].append(create_con)
+    bare_types.setdefault(result_type, list()).append(ConInfo(result_type, header, bare_type))
 
-tltype_template = """
-class {}(TLType):
-    constructors = {{}}
-"""
+    # print(header)
+    # print(bare_type)
 
-for result_type, items in cons.items():
-    if result_type != 'TLType':
-        print(tltype_template.format(result_type))
+    # if '{}_c'.format(result_type).upper() == name.upper():
+    #     boxed_type = boxed_type_template.format(boxed_name=result_type, bare_name=name)
+    #     print(boxed_type)
 
-    for i in items:
-        print(i)
+    # print()
+    # cons.setdefault(result_type, list()).append(bare_type)
+
+for result_type, bares in bare_types.items():
+    print('"""')
+    for bare_type in bares:
+        print(bare_type.header)
+    print('"""')
+
+    for bare_type in bares:
+        print(bare_type.definition)
+
+    print(boxed_type_template.format(result_type=result_type))
+
+# print(cons)
+
+
+# for result_type, items in cons.items():
+#     for i in items:
+#         print(i)
+
+#     if result_type != 'TLType':
+#         print(boxed_type_template.format(result_type))
