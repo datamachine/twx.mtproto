@@ -21,6 +21,14 @@ def generate_number(string):
     """
     return int_c(crc32(string.encode()))
 
+class MTPType:
+
+    __slots__ = ()
+
+    def __new__(cls, name):
+        if cls is MTPType:
+            return type(name, (MTPType,), dict(_constructors={}))
+        raise NotImplementedError()
 
 class BareType:
 

@@ -55,16 +55,15 @@ bare_type_template = """\
 {name} = BareType(name='{name}', number={number},
     params=[{params}],
     param_types=[{param_types}],
-    result_type={result_type}_type)
+    result_type={result_type}_t)
 """
 
 boxed_type_template = """\
-{result_type} = BoxedType.new('{result_type}', {result_type}_type)
+{result_type} = BoxedType.new('{result_type}', {result_type}_t)
 """
 
 type_template = """
-class {}_type:
-    _constructors = dict()
+{0}_t = MTPType('{0}_t')
 """
 
 from collections import OrderedDict, namedtuple
