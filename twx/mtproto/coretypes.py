@@ -1,7 +1,7 @@
 from collections import namedtuple
 from collections import UserList
 from struct import Struct
-from functools import partial
+from functools import partial, partialmethod
 
 try:
     from . util import crc32
@@ -239,18 +239,23 @@ class vector_c(namedtuple('vector_c', 't num items'), BareType):
 
     def __new__(cls, *args, **kwargs):
         if cls is vector_c:
-            return cls._type_factory(cls, *args, **kwargs)
+            return cls._type_factory(*args, **kwargs)
+        print('making ', cls, args)
         return cls._make(*args, **kwargs)
 
-    @staticmethod
+    @classmethod
     def _type_factory(cls, item_type):
         key = (cls, item_type,)
-        vector_cls = cls._vector_types.get(key)
-        if vector_cls is None:
-            name = '{}_{}'.format(cls.__name__, item_type.__name__)
-            vector_c._vector_types[key] = type(name, (cls,), {'_make': partial(cls._make, item_type)})
-            vector_cls = vector_c._vector_types.get(key)
-        return vector_cls
+
+        def new_vector_type(name, item_type):
+
+            attrs = dict(
+                __new__=partialmethod(cls.__new__, item_type)
+                )
+
+            return type(name, (cls,), attrs)
+
+        return cls._vector_types.setdefault(key, new_vector_type(cls.__name__, item_type))
 
     @classmethod
     def _make(cls, t, iterable):
@@ -272,5 +277,5 @@ class Vector(BoxedType, vector_c):
 
     def __new__(cls, *args, **kwargs):
         if cls is Vector:
-            return vector_c._type_factory(cls, *args, **kwargs)
+            return cls._type_factory(*args, **kwargs)
         return vector_c.__new__(cls, *args, **kwargs)
