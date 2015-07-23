@@ -381,3 +381,4 @@ if __name__ == '__main__':
     print(ResPQ_test)
     print(ResPQ_test.hex_list())
     print(ResPQ_test.get_bytes())
+    print()

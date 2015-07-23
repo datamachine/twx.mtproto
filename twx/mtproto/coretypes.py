@@ -39,7 +39,7 @@ class BareType:
         if cls is BareType:
             return cls._bare_type_factory(*args, **kwargs)
 
-        return cls._make(*args, **kwargs)
+        return cls.new(*args, **kwargs)
 
     @staticmethod
     def _bare_type_factory(name, number, params, param_types, result_type):
@@ -56,7 +56,7 @@ class BareType:
         return bare_type
 
     @classmethod
-    def _make(cls, *args, **kwargs):
+    def new(cls, *args, **kwargs):
         
         len_args = len(args)
         result_args = []
@@ -66,7 +66,7 @@ class BareType:
             result_args.append(param_type(value))
             i += 1
 
-        return super()._make(result_args)
+        return cls._make(result_args)
 
     def buffers(self):
         bufs = list()
@@ -239,7 +239,7 @@ class string_c(BareType, string_c):
     param_types = string_c(_prefix, _data, _padding)
 
     @classmethod
-    def _make(cls, data):
+    def new(cls, data):
         pfx = cls._prefix.new(data)
         data = cls._data.new(data)
         padding = cls._padding.new(pfx, data)
@@ -280,11 +280,6 @@ class vector_c(namedtuple('vector_c', 't num items'), BareType):
             )
 
         return type(cls.__name__, (cls,), attrs)
-
-    # @classmethod
-    # def _make(cls, t, iterable):
-    #     items = [t(i) for i in iterable]
-    #     return super()._make((t, int_c(len(items)), items,))
 
     def buffers(self):
         bufs = int_c.buffers(len(self.items))
