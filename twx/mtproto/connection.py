@@ -237,6 +237,13 @@ class MTProtoUnencryptedMessage(MTProtoMessage,
         auth_key_id, message_id, message_data_length = cls._header_struct.unpack(data[0:20])
         return cls(auth_key_id, message_id, message_data_length, data[20:])
 
+
+class MTProtoTCPConnection(asyncio.Protocol):
+
+    def connection_made(self, transport):
+        self.transport = transport
+
+
 class TCPConnection:
 
     def __init__(self, host, port):
@@ -262,7 +269,7 @@ class TCPConnection:
 
             rec_data_length_bytes = yield from reader.read(4)
             rcv_data_length = int.from_bytes(rec_data_length_bytes, 'little')
-            
+
             rcv_data = yield from reader.read(rcv_data_length - 4)
             rcv_msg = MTProtoTCPMessage.from_bytes(rec_data_length_bytes + rcv_data)
             print(rcv_msg)

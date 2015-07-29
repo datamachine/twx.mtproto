@@ -12,7 +12,7 @@ from time import time
 try:
     from . import tl
     from . import scheme
-    from . connection import MTProtoConnection, TCPConnection
+    from . connection import MTProtoConnection, TCPConnection, MTProtoTCPConnection
 except SystemError:
     import tl
     import scheme
@@ -92,4 +92,3 @@ if __name__ == '__main__':
     asyncio.async(dc.run(loop), loop=loop)
     loop.run_forever()
     loop.close()
-
