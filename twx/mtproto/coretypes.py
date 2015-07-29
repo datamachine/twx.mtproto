@@ -25,13 +25,19 @@ def generate_number(string):
     return int_c(crc32(string.encode()))
 
 class MTPType:
+    constructors = {}
 
     __slots__ = ()
 
     def __new__(cls, name):
         if cls is MTPType:
-            return type(name, (MTPType,), dict(_constructors={}))
+            return type(name, (MTPType,), dict(constructors={}))
         raise NotImplementedError()
+
+    @staticmethod
+    def add_constructor(number, bare_type):
+        pass
+        # self.constructors = 
 
 class BareType:
 
