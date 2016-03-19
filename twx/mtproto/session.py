@@ -1,27 +1,19 @@
-if __name__ == '__main__':
-    import sys
-    from pathlib import Path
-    sys.path.insert(0, str(Path('../..').resolve()))
-
 import random
+import logging
 
-from collections import namedtuple
+from . import scheme
 
-from twx.mtproto.connection import MTProtoConnection
-from twx.mtproto import tl
+__all__ = ('MTProtoSessionData',)
 
-__all__ = ('MTProtoSession',)
-
-class MTProtoSession(namedtuple('MTProtoSession', 'id')):
-
-    def __new__(cls, id):
-        return super().__new__(cls, tl.int64_c(id))
-
-    @classmethod
-    def new(cls):
-        return cls(random.SystemRandom().getrandbits(64))
+log = logging.getLogger(__package__)
 
 
-if __name__ == '__main__':
-    session = MTProtoSession(10)
-    print(session, session.to_bytes())
+class MTProtoSessionData:
+
+    def __init__(self, id):
+        if id is None:
+            id = random.SystemRandom().getrandbits(64)
+            log.debug('no session_id provided, generated new session_id: {}'.format(id))
+
+        self._id = scheme.int64_c(id)
+        self._auth_keys = dict()

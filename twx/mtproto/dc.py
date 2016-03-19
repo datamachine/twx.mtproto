@@ -5,25 +5,26 @@ import random
 from ipaddress import ip_address
 from collections import namedtuple
 from urllib.parse import urlsplit
-from struct import Struct
 
-from time import time
+from . import prime
+
+log = logging.getLogger(__package__)
+
+print(__package__)
 
 try:
-    from . import tl
     from . import scheme
-    from . connection import MTProtoConnection, TCPConnection, MTProtoTCPConnection
+    from .protocols import MTProtoClientProtocol, ConnectionType
 except SystemError:
-    import tl
     import scheme
-    from connection import MTProtoConnection, TCPConnection
+    from protocols import MTProtoClientProtocol
 
 log = logging.getLogger(__name__)
 
 class DCInfo(namedtuple('DCInfo', 'address port connection_type')):
 
     def __new__(cls, address, port, connection_type):
-        return super().__new__(cls, ip_address(address), int(port), MTProtoConnection.ConnectionType(connection_type))
+        return super().__new__(cls, ip_address(address), int(port), ConnectionType(connection_type))
 
     @classmethod
     def new(cls, url):
@@ -34,7 +35,7 @@ class DataCenter:
 
     def __init__(self, url):
         self.dc = DCInfo.new(url)
-        self.connection = TCPConnection(str(self.dc.address), self.dc.port)
+        self.connection = None
         self.last_msg_id = 0
         self.auth_key = None
         self.random = random.SystemRandom()
@@ -49,46 +50,46 @@ class DataCenter:
         # f1.add_done_callback(lambda x: self.create_auth_key())
         # loop.run_until_complete(asyncio.wait(tasks))
 
-    def send_rpc_message(self, msg):
-        pass
-        # self.conn.send_message(msg)
-    
-    def generate_message_id(self):
-        msg_id = int(time() * 2**32)
-        if self.last_msg_id > msg_id:
-            msg_id = self.last_msg_id + 1
-        while msg_id % 4 is not 0:
-            msg_id += 1
-
-        return msg_id
-
     @asyncio.coroutine
     def send_insecure_message(self, request):
         yield from self.connection.send_insecure_message(self.generate_message_id(), request)
-        # self.conn.send_insecure_message(self.generate_message_id(), request)
 
     @asyncio.coroutine
     def create_auth_key(self):
-        req_pq = scheme.req_pq(tl.int128_c(self.random.getrandbits(128)))
-        yield from self.send_insecure_message(req_pq)
-        # res_pq = tl.ResPQ.from_stream(BytesIO(self.recv_plaintext_message()))
+        from random import SystemRandom
+        rand = SystemRandom()
 
-        # assert nonce == res_pq.nonce
+        req_pq = scheme.req_pq(nonce=rand.getrandbits(128))
+        log.debug(req_pq)
+        yield from self.connection.send_insecure_message(req_pq)
+        response = yield from self.connection.get_ingress()
+        resPQ = response.get_message()
+        log.debug(resPQ)
+
+        pq = int.from_bytes(resPQ.pq.data, 'big')
+
+        p, q = prime.primefactors(pq, True)
 
     @asyncio.coroutine
-    def run(self, loop):
-        asyncio.async(self.connection.run(loop), loop=loop)
+    def async_run(self, loop):
+        self.connection = MTProtoClientProtocol.new('TCP')
+        coro = self.connection.create_connection('149.154.167.40', 443, loop=loop)
+
+        asyncio.async(self.connection.handle_egress(), loop=loop)
+        asyncio.async(coro, loop=loop)
         asyncio.async(self.create_auth_key(), loop=loop)
 
-        while True:
-            print('test')
-            yield from asyncio.sleep(10)
-
 if __name__ == '__main__':
+    import sys
+
+    log.setLevel(logging.DEBUG)
+    ch = logging.StreamHandler(sys.stdout)
+    ch.setLevel(logging.DEBUG)
+    log.addHandler(ch)
 
     dc = DataCenter('tcp://149.154.167.40:443')
 
     loop = asyncio.get_event_loop()
-    asyncio.async(dc.run(loop), loop=loop)
+    asyncio.async(dc.async_run(loop), loop=loop)
     loop.run_forever()
     loop.close()

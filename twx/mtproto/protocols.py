@@ -1,11 +1,17 @@
 import asyncio
 
 from enum import Enum
-from collections import namedtuple, OrderedDict
+from collections import namedtuple
 from struct import Struct
+from urllib.parse import urlsplit
+
+from . import prime
 
 from . import scheme
-from .util import to_hex, crc32
+from .util import crc32
+
+import logging
+log = logging.getLogger(__package__)
 
 
 class MTProtoUnencryptedMessage(
@@ -36,6 +42,9 @@ class MTProtoUnencryptedMessage(
     def from_bytes(cls, data):
         auth_key_id, message_id, message_data_length = cls._header_struct.unpack(data[0:20])
         return super().__new__(cls, auth_key_id, message_id, message_data_length, data[20:])
+
+    def get_message(self):
+        return scheme.MTPType.from_bytes(self.message_data[0:self.message_data_length])
 
 
 class MTProtoTCPMessage(namedtuple('MTProtoTCPMessage', 'data')):
@@ -100,26 +109,26 @@ class ConnectionType(str, Enum):
 
 class MTProtoClientProtocol(asyncio.Protocol):
 
-    def __init__(self):
+    last_msg_id = 0
+
+    def __new__(cls, server_url, *args, **kwargs):
+        if cls is MTProtoClientProtocol:
+            server_info = urlsplit(server_url)
+            if server_info.scheme.upper() == ConnectionType.TCP:
+                return MTProtoTCPClientProtocol(server_info)
+            raise NotImplementedError()
+        return object.__new__(cls)
+
+    def __init__(self, server_info):
         self._ingress = asyncio.Queue()
         self._egress = asyncio.Queue()
-        self.last_msg_id = 0
-
-    @classmethod
-    def new(cls, connection_type):
-        if cls is MTProtoClientProtocol:
-            connection_type = ConnectionType(connection_type)
-            if connection_type is ConnectionType.TCP:
-                return MTProtoTCPClientProtocol()
-
-        raise NotImplementedError()
 
     @asyncio.coroutine
     def send_insecure_message(self, msg):
         raise NotImplementedError()
 
     @asyncio.coroutine
-    def get_message(self):
+    def get_ingress(self):
         result = yield from self._ingress.get()
         return result
 
@@ -128,7 +137,7 @@ class MTProtoClientProtocol(asyncio.Protocol):
         message_id = generate_message_id(self.last_msg_id)
         mtproto_msg = MTProtoUnencryptedMessage.new(message_id, msg)
         self.last_msg_id = message_id
-        print('send_insecure_message', msg)
+        log.debug('send_insecure_message', msg)
         yield from self._egress.put(mtproto_msg)
 
     @asyncio.coroutine
@@ -141,8 +150,8 @@ class MTProtoClientProtocol(asyncio.Protocol):
 
 class MTProtoTCPClientProtocol(MTProtoClientProtocol):
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, server_info):
+        super().__init__(server_info)
         self._seq_no = 0
         self._tcp_egress = asyncio.Queue()
         self.transport = None
@@ -152,7 +161,9 @@ class MTProtoTCPClientProtocol(MTProtoClientProtocol):
 
     def connection_made(self, transport):
         self.transport = transport
-        print('connection_made:', self.transport)
+        print('Transport:', type(transport), '\n\n', dir(transport), '\n\n')
+        print('Protocol:', self, dir(self))
+        log.debug('connection_made:', self.transport, '\n\n')
 
     def data_received(self, data):
         tcp_msg = MTProtoTCPMessage.from_bytes(data)
@@ -161,7 +172,7 @@ class MTProtoTCPClientProtocol(MTProtoClientProtocol):
             # print(self._ingress)
 
     def connection_lost(self, exc):
-        print('connection_lost:', exc)
+        log.debug('connection_lost:', exc)
 
     @asyncio.coroutine
     def handle_egress(self):
@@ -169,8 +180,9 @@ class MTProtoTCPClientProtocol(MTProtoClientProtocol):
             while self.transport is None:
                 yield from asyncio.sleep(0.1)
 
+            log.debug('handle_egress')
+
             mtproto_msg = yield from self._egress.get()
-            print('handle_egress:', mtproto_msg)
             tcp_msg = MTProtoTCPMessage.new(self._seq_no, mtproto_msg)
             self._seq_no += 1
             yield from self._tcp_egress.put(tcp_msg)
@@ -195,19 +207,26 @@ def create_auth_key_test(connection, loop):
     rand = SystemRandom()
 
     req_pq = scheme.req_pq(nonce=rand.getrandbits(128))
+    print(req_pq)
     yield from connection.send_insecure_message(req_pq)
-    print('waiting for response')
-    response = yield from connection.get_message()
-    print('response:', response)
+    response = yield from connection.get_ingress()
+    resPQ = response.get_message()
+    print(resPQ)
+
+def coro_test(coro):
+    yield coro
 
 
 if __name__ == '__main__':
 
     loop = asyncio.get_event_loop()
 
-    conn = MTProtoClientProtocol.new('TCP')
+    conn = MTProtoClientProtocol('tcp://149.154.167.40:443')
 
     coro = conn.create_connection('149.154.167.40', 443, loop=loop)
+    coro_test(coro)
+
+    print('coro:', coro)
 
     asyncio.async(coro, loop=loop)
     asyncio.async(conn.handle_egress(), loop=loop)

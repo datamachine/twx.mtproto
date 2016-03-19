@@ -2,11 +2,13 @@ import struct
 import asyncio
 import logging
 import struct
+import time
 
 from enum import Enum
 from collections import namedtuple
 from io import BytesIO
-import time
+from urllib.parse import urlsplit
+
 
 try:
     from . util import crc32, to_hex
@@ -201,6 +203,7 @@ class EmptyValue:
 
     def __new__(cls):
         raise SyntaxError()
+
 
 class MTProtoUnencryptedMessage(MTProtoMessage,
     namedtuple('MTProtoUnencryptedMessage', 'auth_key_id message_id message_data_length message_data')):

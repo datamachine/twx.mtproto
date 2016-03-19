@@ -2,16 +2,26 @@ from collections import namedtuple
 from collections import UserList
 from struct import Struct
 from functools import partial, partialmethod
+from io import BytesIO
 
 try:
     from . util import crc32
 except SystemError:
     from util import crc32
 
-class MTProtoKeyNotReadyError(Exception):
+class MTProtoException(Exception):
     pass
 
-class StreamReadError(Exception):
+class MTProtoKeyNotReadyError(MTProtoException):
+    pass
+
+class MTProtoStreamReadError(MTProtoException):
+    pass
+
+class MTProtoInvalidNumberError(MTProtoException):
+    pass
+
+class MTProtoCRCMismatchError(MTProtoException):
     pass
 
 def generate_number(string):
@@ -25,30 +35,44 @@ def generate_number(string):
     return int_c(crc32(string.encode()))
 
 class MTPType:
-    constructors = {}
+    _combinators = {}
 
     __slots__ = ()
 
     def __new__(cls, name):
         if cls is MTPType:
-            return type(name, (MTPType,), dict(constructors={}))
+            return type(name, (MTPType,), dict(_type_constructors={}))
         raise NotImplementedError()
 
     @staticmethod
-    def add_constructor(number, bare_type):
-        pass
-        # self.constructors = 
+    def add_combinator(number, bare_type):
+        return MTPType._combinators.setdefault(number, bare_type)
+
+    @staticmethod
+    def get_combinator(number):
+        return MTPType._combinators.get(number, NotImplemented)
+
+    @classmethod
+    def from_bytes(cls, data):
+        if cls is MTPType:
+            stream = BytesIO(data)
+
+            number = int.from_bytes(stream.read(4), 'little')
+            combinator = cls.get_combinator(number)
+            return combinator.from_stream(stream)
+        raise NotImplementedError()
+
 
 class BareType:
 
     def __new__(cls, *args, **kwargs):
         if cls is BareType:
-            return cls._type_factory(*args, **kwargs)
+            return cls._bare_type_factory(*args, **kwargs)
 
         return cls.new(*args, **kwargs)
 
     @classmethod
-    def _type_factory(cls, name, number, params, param_types, result_type):
+    def _bare_type_factory(cls, name, number, params, param_types, result_type):
         param_tuple = namedtuple(name, params)
         param_types = param_tuple(*param_types)
 
@@ -57,7 +81,8 @@ class BareType:
             param_types=param_types,
             )
 
-        return type(name, (cls, param_tuple, result_type,), attrs)
+        bare_type = type(name, (cls, param_tuple, result_type,), attrs)
+        return MTPType.add_combinator(bare_type.number, bare_type)
         
     @classmethod
     def new(cls, *args, **kwargs):
@@ -84,6 +109,14 @@ class BareType:
     def hex_list(self):
         """ returns of strings list of all individual elements converted to bytes and formatted in hex """
         return [''.join(['{:02X}'.format(b) for b in data]) for data in self.buffers()]
+
+    @classmethod
+    def from_stream(cls, stream):
+        items = []
+
+        for param_type in cls.param_types._asdict().values():
+            items.append(param_type.from_stream(stream))
+        return tuple.__new__(cls, items)
 
 class BoxedType:
 
@@ -128,19 +161,34 @@ class BoxedType:
         return type(cls.name, (cls, bare_type,), dict())
 
     def buffers(self):
-        return self.number.buffers() + super().buffers()
+        return self.number.buffers() + super().buffers()    
+
 
 class Function(BareType):
 
     def __new__(cls, *args, **kwargs):
         if cls is Function:
-            return cls._type_factory(*args, **kwargs)
+            return cls._bare_type_factory(*args, **kwargs)
         return cls.new(*args, **kwargs)
 
     def buffers(self):
         return self.number.buffers() + super().buffers()
 
-class int_c(int):
+class _IntMixin:
+    __slots__ = ()
+
+
+    def buffers(self):
+        return [self.get_bytes()]
+
+    def get_bytes(self):
+        return self.to_bytes(self._num_bytes, 'little')
+
+    @classmethod
+    def from_stream(cls, stream):
+        return cls(int.from_bytes(stream.read(cls._num_bytes), 'little'))
+
+class int_c(int, _IntMixin):
 
     """
     int ? = Int
@@ -149,47 +197,37 @@ class int_c(int):
 
     number = 'int ? = Int'
 
-    _struct = Struct('<I')
+    _num_bytes = 4
 
-    def buffers(self):
-        return [self.get_bytes()]
-
-    def get_bytes(self):
-        return int_c._struct.pack(self)
 
 int_c.number = generate_number(int_c.number)
 
 int32_c = int_c  # alias for general utility
 
 
-class long_c(int):
+class long_c(int, _IntMixin):
 
     __slots__ = ()
 
     number = generate_number('long ? = Long')
 
-    _struct = Struct('<Q')
-
-    def buffers(self):
-        return [long_c._struct.pack(self)]
+    _num_bytes = 8
 
 int64_c = long_c  # alias for general utility
 
 
-class int128_c(int):
+class int128_c(int, _IntMixin):
 
     number = generate_number('int 4*[ int ] = Int128')
 
-    def buffers(self):
-        return [self.to_bytes(16, 'little')]
+    _num_bytes = 16
 
 
-class int256_c(int):
+class int256_c(int, _IntMixin):
 
     number = generate_number('int 8*[ int ] = Int256')
 
-    def buffers(self):
-        return [self.to_bytes(32, 'little')]
+    _num_bytes = 32
 
 
 class double_c(float):
@@ -263,6 +301,21 @@ class string_c(BareType, string_c):
 
         return tuple.__new__(cls, (pfx, data, padding))
 
+    @classmethod
+    def from_stream(cls, stream):
+        length = stream.read(1)[0]
+        count = 1
+        if length == 254:
+            length = int.from_bytes(stream.read(3), 'little')
+            count += 3
+        data = stream.read(length)
+        count += length
+
+        # clear the padding from the stream
+        stream.read((4 - count % 4) % 4)
+
+        return cls.new(data)
+
 
 class vector_c(namedtuple('vector_c', 't num items'), BareType):
 
@@ -304,6 +357,13 @@ class vector_c(namedtuple('vector_c', 't num items'), BareType):
             bufs.extend(item.buffers())
         return bufs
 
+    @classmethod
+    def from_stream(cls, stream):
+        num = int_c.from_stream(stream)
+        items = []
+        for i in iter(range(num)):
+            items.append(cls._item_type.from_stream(stream))
+        return cls.new(items)
 
 class bytes_c(string_c):
     pass
@@ -315,3 +375,10 @@ class Vector(vector_c, BoxedType):
         if cls is Vector:
             return cls.get_vector_type(*args, **kwargs)
         return cls.new(*args, **kwargs)
+
+    @classmethod
+    def from_stream(cls, stream):
+        number = int_c.from_stream(stream)
+        if number != cls.number:
+            raise MTProtoInvalidNumberError()
+        return super().from_stream(stream)

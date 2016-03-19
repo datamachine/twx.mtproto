@@ -1,39 +1,36 @@
 import os
-from socket import socket
-import struct
-from time import time
-from collections import OrderedDict
+import asyncio
+import sys
 
 from random import SystemRandom
-from Crypto.PublicKey import RSA
-from Crypto.Util.strxor import strxor
-from Crypto.Util.number import long_to_bytes, bytes_to_long
-
 from io import BytesIO
-
-from . util import to_hex, crc32, print_hex, substr
-from . crypt import SHA1
-
-from . import rpc
-from . import crypt
-from . import prime
-
-from . import tl
-from . import dc
-from . session import MTProtoSession
-
-from . authkey import MTProtoAuthKey, aes_encrypt, aes_decrypt
-
-import sys
-import logging
-log = logging.getLogger(__name__)
-
+from socket import socket
+from time import time
 from collections import namedtuple
 from struct import Struct
+from urllib.parse import urlsplit
+from queue import Queue
 
-import asyncio
+from Crypto.PublicKey import RSA
+from Crypto.Util.strxor import strxor
+from Crypto.Util.number import long_to_bytes
 
-class MTProto:
+
+from . util import to_hex, crc32
+from . crypt import SHA1
+from . import crypt
+from . import prime
+from . import tl
+from . import dc
+from . import scheme
+from . session import MTProtoSessionData
+from . authkey import MTProtoAuthKey, aes_encrypt, aes_decrypt
+from .log import log
+from .transports import MTProtoTransport
+
+
+
+class MTProtoOld:
 
     def __init__(self, api_secret, api_id, rsa_key):
         self.api_secret = api_secret
@@ -96,7 +93,7 @@ class Datacenter:
         self.socket = self._socket.makefile(mode='rwb', buffering=0)
         self.message_queue = []
 
-        self.last_msg_id = 0
+        self.last_message_id = 0
         self.timedelta = 0
         self.number = 0
 
@@ -314,8 +311,8 @@ class Datacenter:
 
     def generate_message_id(self):
         msg_id = int(time() * 2**32)
-        if self.last_msg_id > msg_id:
-            msg_id = self.last_msg_id + 1
+        if self.last_message_id > msg_id:
+            msg_id = self.last_message_id + 1
         while msg_id % 4 is not 0:
             msg_id += 1
 
@@ -340,7 +337,8 @@ class Datacenter:
             auth_key_id:int64 | msg_key:int128 | encrypted_data:bytes
 
         Encrypted Message: encrypted_data
-            salt:int64 | session_id:int64 | message_id:int64 | seq_no:int32 | message_data_length:int32 | message_data:bytes | padding 0..15:bytes
+            salt:int64 | session_id:int64 | message_id:int64 | seq_no:int32 |
+            message_data_length:int32 | message_data:bytes | padding 0..15:bytes
         """
 
         if self.session_id is None:
@@ -366,7 +364,7 @@ class Datacenter:
 
         """
         at this point, message_data looks a lot like this:
-        message_data: 
+        message_data:
             Msg container -> DCF8F173
                 Vector<%Message>
                 num_items:int -> 02000000 
@@ -410,6 +408,7 @@ class Datacenter:
         # cleanup
         self._socket.close()
 
+
 class MTProtoMessage:
 
     @classmethod
@@ -427,7 +426,7 @@ class MTProtoMessage:
     
 
 class MTProtoEncryptedMessage(namedtuple('MTProtoEncryptedMessage',
-    'auth_key_id msg_key encrypted_data'), MTProtoMessage):
+                                         'auth_key_id msg_key encrypted_data'), MTProtoMessage):
 
     """
     Ecrypted Message:
@@ -485,32 +484,6 @@ class MTProtoEncryptedMessage(namedtuple('MTProtoEncryptedMessage',
         return b''.join((self.auth_key_id, self.msg_key, self.encrypted_data,))
 
 
-class MTProtoUnencryptedMessage(MTProtoMessage,
-    namedtuple('MTProtoUnencryptedMessage', 'auth_key_id message_id message_data_length message_data')):
-
-    """
-    Unencrypted Message:
-        auth_key_id = 0:int64   message_id:int64   message_data_length:int32   message_data:bytes
-    """
-
-    _header_struct = Struct('<QQI')
-
-    @classmethod
-    def new(cls, message_id, message_data):
-        return cls.__new__(cls, 0, message_id, len(message_data), message_data)
-
-        result = cls.__new__(cls)
-        result.data = cls._header_struct.pack(0, message_id, len(message_data)) + message_data
-        return result
-
-    @classmethod
-    def from_bytes(cls, data):
-        auth_key_id, message_id, message_data_length = cls._header_struct.unpack(data[0:20])
-        return cls(auth_key_id, message_id, message_data_length, data[20:])
-
-    def to_bytes(self):
-        return self._header_struct.pack(self.auth_key_id, self.message_id, self.message_data_length) + self.message_data
-
 class MTProtoTCPMessage(namedtuple('MTProtoTCPMessage', 'data')):
 
     @classmethod
@@ -555,53 +528,240 @@ class MTProtoTCPMessage(namedtuple('MTProtoTCPMessage', 'data')):
         return self.data
 
 
+# class MTProtoClient:
+
+#     def __init__(self, config, session_id=None):
+
+#         self.api_id = config.get('app', 'api_id')
+#         self.api_hash = config.get('app', 'api_hash')
+#         self.app_title = config.get('app', 'app_title')
+#         self.short_name = config.get('app', 'short_name')
+
+#         self.public_keys = config.get('servers', 'public_keys')
+
+#         self.test_dc = dc.DataCenter(config.get('servers', 'test_dc'))
+#         self.productinon_dc = dc.DataCenter(config.get('servers', 'production_dc'))
+
+#         # if self.use_test_dc:
+#         self.datacenter = self.test_dc
+#         # else:
+#         #     self.datacenter = self.productinon_dc
+
+#         # self.datacenter = dc.DataCenter('tcp://127.0.0.1:8888')
+
+#         if session_id is None:
+#             self.session = MTProtoSession.new()
+#             print('creating new session: {}'.format(self.session))
+#         else:
+#             self.session = MTProtoSession(session_id)
+#             print('continuing session: {}'.format(self.session))
+
+#     @asyncio.coroutine
+#     def run(self, loop):
+#         while True:
+#             # self.get_nearest_dc()
+#             yield from asyncio.sleep(1)
+
+#     def compare(self):
+#         MTProto('FFFFFFFFF', 'EEEEEEEE', self.public_keys)
+
+#     def init(self, loop):
+#         # MTProto('FFFFFFFFF', 'EEEEEEEE', self.public_keys)
+#         asyncio.async(self.run(loop))
+#         self.datacenter.init(loop)
+
+#     # def add_to_run_loop(self, loop):
+#     #     from . connection import MTProtoConnection
+
+#     #     self.conn = MTProtoConnection('TCP')
+#     #     coro = loop.create_connection(lambda: self.conn, '127.0.0.1', 8888)
+
+#     #     loop.run_until_complete(coro)
+#     #     loop.run_until_complete(self.run())
+
+
+# class MTProtoClientProtocol(asyncio.Protocol):
+#     _header_struct = Struct('<QI')
+
+#     last_message_id = 0
+
+#     def __init__(self, server_info):
+#         self._ingress = asyncio.Queue()
+#         self._egress = asyncio.Queue()
+#         self._mtproto_transport = None
+
+#     @asyncio.coroutine
+#     def get_ingress(self):
+#         result = yield from self._ingress.get()
+#         return result
+
+#     @asyncio.coroutine
+#     def send_insecure_message(self, msg_data):
+#         message_id = generate_message_id(self.last_message_id)
+
+#         mtproto_msg = memoryview(bytearray(self._header_struct.size + len(msg_data)))
+#         self._header_struct.pack_into(mtproto_msg, 8, message_id, len(msg_data))
+#         mtproto_msg[-len(msg_data):] = msg_data
+
+#         self.last_message_id = message_id
+        
+#         self.transport.write(mtproto_msg)
+
+
+#     @asyncio.coroutine
+#     def send_encrypted_message(self, msg):
+#         yield from self._egress.put(msg)
+
+#     def create_connection(self, *args, **kwargs):
+#         raise NotImplementedError()
+
+# def generate_message_id(last_message_id):
+#     from time import time
+
+#     msg_id = int(time() * 2**32)
+#     if last_message_id > msg_id:
+#         msg_id = last_message_id + 1
+#     while msg_id % 4 is not 0:
+#         msg_id += 1
+
+#     return msg_id
+
+
+class MTProtoUnencryptedMessage(
+    namedtuple('MTProtoUnencryptedMessage', 'message_id message')):
+
+    """
+    Unencrypted Message:
+        auth_key_id = 0:int64   message_id:int64   message_data_length:int32   message_data:bytes
+    """
+
+    _header_struct = Struct('<QQI')
+
+    def __new__(cls, message_id, message):
+        return super().__new__(cls, scheme.int64_c(message_id), message)
+    #     message_data = msg.get_bytes()
+    #     return super().__new__(cls, 
+    #         auth_key_id=scheme.int64_c(0),
+    #         message_id=scheme.int64_c(message_id),
+    #         message_data_length=scheme.int32_c(len(message_data)),
+    #         message_data=message_data)
+
+    auth_key_id = scheme.int64_c(0).get_bytes()
+
+    @classmethod
+    def from_bytes(cls, data):
+        auth_key_id, message_id, message_data_length = cls._header_struct.unpack(data[0:20])
+        return super().__new__(cls, auth_key_id, message_id, message_data_length, data[20:])
+
+    def get_bytes(self):
+        message_data = self.message.get_bytes()
+        message_data_length = scheme.int32_c(len(message_data)).get_bytes()
+        message_id = self.message_id.get_bytes()
+
+        mtproto_msg = bytes().join((self.auth_key_id, message_id, message_data_length, message_data),)
+
+        return mtproto_msg
+
+
 class MTProtoClient:
 
-    def __init__(self, config, session_id=None):
-
-        self.api_id = config.get('app', 'api_id')
-        self.api_hash = config.get('app', 'api_hash')
-        self.app_title = config.get('app', 'app_title')
-        self.short_name = config.get('app', 'short_name')
-
-        self.public_keys = config.get('servers', 'public_keys')
-
-        self.test_dc = dc.DataCenter(config.get('servers', 'test_dc'))
-        self.productinon_dc = dc.DataCenter(config.get('servers', 'production_dc'))
-
-        # if self.use_test_dc:
-        self.datacenter = self.test_dc
-        # else:
-        #     self.datacenter = self.productinon_dc
-
-        # self.datacenter = dc.DataCenter('tcp://127.0.0.1:8888')
-
-        if session_id is None:
-            self.session = MTProtoSession.new()
-            print('creating new session: {}'.format(self.session))
-        else:
-            self.session = MTProtoSession(session_id)
-            print('continuing session: {}'.format(self.session))
+    def __init__(self, session_data=None):
+        self._transport = None
+        self._ingress = asyncio.Queue()
+        self._egress = asyncio.Queue()
+        self.last_message_id = 0
 
     @asyncio.coroutine
-    def run(self, loop):
-        while True:
-            # self.get_nearest_dc()
+    def _handle_egress(self):
+        done = False
+        while not done:
+            msg = yield from self._egress.get()
+            log.debug('_handle_egress: {}'.format(msg))
+            while self._transport is None:
+                yield from asyncio.sleep(.1)
+
+            yield from self._transport.send(msg.get_bytes())
+
+    @asyncio.coroutine
+    def _handle_ingress(self):
+        done = False
+        while not done:
+            msg = yield from self._ingress.get()
+            self.transport.send(msg.get_bytes())
             yield from asyncio.sleep(1)
 
-    def compare(self):
-        MTProto('FFFFFFFFF', 'EEEEEEEE', self.public_keys)
+    @asyncio.coroutine
+    def _handle_connection(self, loop):
+        if self._transport is None:
+            log.debug('no transport, creating one now')
+            self._transport = MTProtoTransport('TCP')
+            coro = loop.create_connection(lambda: self._transport, '149.154.167.40', 443)
+            asyncio.async(coro)
 
-    def init(self, loop):
-        # MTProto('FFFFFFFFF', 'EEEEEEEE', self.public_keys)
-        asyncio.async(self.run(loop))
-        self.datacenter.init(loop)
+        done = False
+        while not done:
+            yield from asyncio.sleep(1)    
 
-    # def add_to_run_loop(self, loop):
-    #     from . connection import MTProtoConnection
+    def generate_message_id(self):
+        msg_id = int(time() * 2**32)
+        if self.last_message_id > msg_id:
+            msg_id = self.last_message_id + 1
+        while msg_id % 4 is not 0:
+            msg_id += 1
 
-    #     self.conn = MTProtoConnection('TCP')
-    #     coro = loop.create_connection(lambda: self.conn, '127.0.0.1', 8888)
+        return msg_id
 
-    #     loop.run_until_complete(coro)
-    #     loop.run_until_complete(self.run())
+    @asyncio.coroutine
+    def send_unencrypted_message(self, msg_obj):
+        unencrypted_message = MTProtoUnencryptedMessage(self.generate_message_id(), msg_obj)
+        yield from self._egress.put(unencrypted_message)
+
+    def send_encrypted_message(self, msg_obj):
+        raise NotImplementedError()
+
+    @asyncio.coroutine
+    def async_run(self, loop):
+        self._transport = MTProtoTransport('TCP')
+
+        done = False
+        while not done:
+            yield from asyncio.sleep(1)
+
+    @asyncio.coroutine
+    def create_authorization_key(self):
+            yield from self.send_unencrypted_message(scheme.req_pq(nonce=SystemRandom().getrandbits(128)))
+
+    def run(self):
+        loop = asyncio.get_event_loop()
+        self._transport = MTProtoTransport('TCP')
+
+        try:
+            loop.run_in_executor(None, self._transport.run())
+            asyncio.async(self._handle_egress())
+            asyncio.async(self._handle_ingress())
+            # asyncio.async(self._handle_connection(loop))
+            # asyncio.async(self.async_run(loop))
+
+            # asyncio.async(self.create_authorization_key())
+
+            loop.run_forever()
+        except KeyboardInterrupt:
+            print('exiting due to KeyboardInterrupt')
+        finally:
+            loop.close()
+
+
+def main():
+    client = MTProtoClient()
+    client.run()
+
+    # dc = DataCenter('tcp://149.154.167.40:443')
+
+    # loop = asyncio.get_event_loop()
+    # asyncio.async(dc.async_run(loop), loop=loop)
+    # loop.run_forever()
+    # loop.close()
+
+
+if __name__ == '__main__':
+    main()

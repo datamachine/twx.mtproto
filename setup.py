@@ -53,7 +53,7 @@ setup(
     keywords = ['datamachine', 'telex', 'telegram', 'bot', 'mtproto'],
     url = 'https://github.com/datamachine/twx', 
     download_url = download_url, 
-    install_requires=['requests', 'twx.botapi'],
+    install_requires=['requests'],
     platforms = ['Linux', 'Unix', 'MacOsX', 'Windows'],
     classifiers = [
       development_status[1],
